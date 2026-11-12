@@ -6,17 +6,23 @@ import com.example.data.model.CommitmentEntity
 import com.example.data.model.DebtEntity
 import com.example.data.model.ExpenseEntity
 import com.example.data.model.FinancialProfileEntity
+import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyCheckInEntity
+import com.example.data.model.MonthlyIncomeEntity
+import com.example.data.model.SavingsAccountEntity
+import com.example.data.model.SavingsTransactionEntity
 import com.example.logic.AchievementEngine
 import com.example.logic.FlowchartCalculator
 import com.example.logic.FlowchartJourneyState
+import com.example.logic.KwspCalculator
+import com.example.logic.KwspContributionBreakdown
 import com.example.util.DateUtils
 import com.example.widget.ExpenseWidgetProvider
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -39,9 +45,9 @@ data class MonthlyCommitmentItem(
 
 data class MonthlySummaryData(
     val monthKey: String,
+    val grossSalary: Double,
     val netSalary: Double,
-    val isDecemberBonusMonth: Boolean,
-    val thirteenthMonthBonus: Double,
+    val variableIncome: Double,
     val totalIncome: Double,
     val plannedCommitments: Double,
     val paidCommitments: Double,
@@ -52,8 +58,11 @@ data class MonthlySummaryData(
     val remainingCashflow: Double,
     val totalDebtRemaining: Double,
     val totalDebtReduction: Double,
-    val accessibleSavings: Double,
-    val totalKwsp: Double
+    val everydayCash: Double,
+    val dedicatedSavings: Double,
+    val dedicatedEmergencyFund: Double,
+    val totalKwsp: Double,
+    val kwspBreakdown: KwspContributionBreakdown
 )
 
 class FinancialRepository(private val context: Context) {
@@ -64,20 +73,33 @@ class FinancialRepository(private val context: Context) {
     private val profileDao = db.financialProfileDao()
     private val debtDao = db.debtDao()
     private val achievementDao = db.achievementDao()
+    private val savingsAccountDao = db.savingsAccountDao()
+    private val savingsTransactionDao = db.savingsTransactionDao()
+    private val monthlyIncomeDao = db.monthlyIncomeDao()
+    private val flowchartVerificationDao = db.flowchartVerificationDao()
 
-    val profileFlow: Flow<FinancialProfileEntity?> = profileDao.getProfile()
-    val debtsFlow: Flow<List<DebtEntity>> = debtDao.getAllDebts()
-    val commitmentsFlow: Flow<List<CommitmentEntity>> = commitmentDao.getAllCommitments()
-    val achievementsFlow: Flow<List<AchievementEntity>> = achievementDao.getAllAchievements()
-    val latestUnlockedAchievementFlow: Flow<AchievementEntity?> = achievementDao.getLatestUnlockedAchievement()
+    val profileFlow: Flow<FinancialProfileEntity?> = profileDao.getProfile().distinctUntilChanged()
+    val debtsFlow: Flow<List<DebtEntity>> = debtDao.getAllDebts().distinctUntilChanged()
+    val commitmentsFlow: Flow<List<CommitmentEntity>> = commitmentDao.getAllCommitments().distinctUntilChanged()
+    val achievementsFlow: Flow<List<AchievementEntity>> = achievementDao.getAllAchievements().distinctUntilChanged()
+    val latestUnlockedAchievementFlow: Flow<AchievementEntity?> = achievementDao.getLatestUnlockedAchievement().distinctUntilChanged()
+
+    // My Savings Vault Flows
+    val savingsAccountsFlow: Flow<List<SavingsAccountEntity>> = savingsAccountDao.getAllAccounts().distinctUntilChanged()
+    val totalDedicatedSavingsFlow: Flow<Double> = savingsAccountDao.getTotalDedicatedSavings().map { it ?: 0.0 }.distinctUntilChanged()
+    val totalEmergencyFundFlow: Flow<Double> = savingsAccountDao.getTotalEmergencyFund().map { it ?: 0.0 }.distinctUntilChanged()
+    val totalInterestCreditedFlow: Flow<Double> = savingsAccountDao.getTotalInterestCredited().map { it ?: 0.0 }.distinctUntilChanged()
+
+    val flowchartVerificationsFlow: Flow<List<FlowchartVerificationEntity>> = flowchartVerificationDao.getAllVerifications().distinctUntilChanged()
 
     fun getExpensesForMonth(monthKey: String): Flow<List<ExpenseEntity>> {
         return expenseDao.getExpensesForMonth(monthKey)
     }
 
-    /**
-     * Combines Commitments and Check-Ins for a given monthKey into complete items.
-     */
+    fun getIncomeForMonth(monthKey: String): Flow<MonthlyIncomeEntity?> {
+        return monthlyIncomeDao.getIncomeForMonth(monthKey)
+    }
+
     fun getCommitmentItemsForMonth(monthKey: String): Flow<List<MonthlyCommitmentItem>> {
         return combine(
             commitmentDao.getAllCommitments(),
@@ -98,19 +120,28 @@ class FinancialRepository(private val context: Context) {
                     paidTimestamp = checkIn?.paidTimestamp
                 )
             }
-        }
+        }.distinctUntilChanged()
     }
 
     /**
-     * Flowchart journey state combined reactively from Profile and Debts.
+     * Flowchart journey state combined reactively from Profile, Debts, Dedicated Emergency Savings, and Verifications.
      */
     val journeyStateFlow: Flow<FlowchartJourneyState> = combine(
         profileDao.getProfile(),
-        debtDao.getAllDebts()
-    ) { profileOpt, debts ->
+        debtDao.getAllDebts(),
+        totalEmergencyFundFlow,
+        totalDedicatedSavingsFlow,
+        flowchartVerificationsFlow
+    ) { profileOpt, debts, emergencySavings, dedicatedSavings, verifications ->
         val profile = profileOpt ?: FinancialProfileEntity()
-        FlowchartCalculator.calculateJourney(profile, debts)
-    }
+        FlowchartCalculator.calculateJourney(
+            profile = profile,
+            debts = debts,
+            dedicatedEmergencySavings = emergencySavings,
+            dedicatedTotalSavings = dedicatedSavings,
+            verifications = verifications
+        )
+    }.distinctUntilChanged()
 
     suspend fun ensureCheckInsForMonth(monthKey: String) = withContext(Dispatchers.IO) {
         val existingCheckIns = monthlyCheckInDao.getCheckInsForMonthDirect(monthKey)
@@ -151,41 +182,47 @@ class FinancialRepository(private val context: Context) {
         )
         val id = expenseDao.insert(expense)
 
-        // Evaluate achievements
         triggerAchievementEvaluation()
-
-        // Update home screen widget
         ExpenseWidgetProvider.updateAllWidgets(context)
-
         id
     }
 
     suspend fun deleteExpense(expense: ExpenseEntity) = withContext(Dispatchers.IO) {
         expenseDao.delete(expense)
+        triggerAchievementEvaluation()
         ExpenseWidgetProvider.updateAllWidgets(context)
     }
 
-    suspend fun markCommitmentPaid(
-        item: MonthlyCommitmentItem,
+    /**
+     * POKA-YOKE Payment Confirmation:
+     * Commits selected payments in a batch.
+     * For HP1 & HP2, does not blindly deduct instalment from legal loan principal.
+     */
+    suspend fun confirmBatchPayments(
         monthKey: String,
-        actualAmount: Double
+        payments: List<Pair<MonthlyCommitmentItem, Double>>
     ) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val checkIn = MonthlyCheckInEntity(
-            id = item.checkInId,
-            monthKey = monthKey,
-            commitmentId = item.commitmentId,
-            isPaid = true,
-            actualPaidAmount = actualAmount,
-            paidTimestamp = now
-        )
-        monthlyCheckInDao.insertOrReplace(checkIn)
+        for ((item, actualAmount) in payments) {
+            val checkIn = MonthlyCheckInEntity(
+                id = item.checkInId,
+                monthKey = monthKey,
+                commitmentId = item.commitmentId,
+                isPaid = true,
+                actualPaidAmount = actualAmount,
+                paidTimestamp = now
+            )
+            monthlyCheckInDao.insertOrReplace(checkIn)
 
-        // If this commitment is paying off a debt, reduce the debt balance!
-        if (item.isDebt && !item.debtKey.isNullOrBlank()) {
-            debtDao.reduceDebtBalance(item.debtKey, actualAmount)
+            // For High-Interest Revolving/Personal loans (Maybank CC & SLoan), payment reduces balance
+            if (item.isDebt && !item.debtKey.isNullOrBlank()) {
+                val debt = debtDao.getDebtByKey(item.debtKey)
+                if (debt != null && debt.isHighInterest) {
+                    debtDao.reduceDebtBalance(item.debtKey, actualAmount)
+                }
+                // Note: For vehicle hire purchase (HP1 & HP2), principal is NOT reduced directly by payment instalment.
+            }
         }
-
         triggerAchievementEvaluation()
     }
 
@@ -203,19 +240,160 @@ class FinancialRepository(private val context: Context) {
         )
         monthlyCheckInDao.insertOrReplace(checkIn)
 
-        // Restore debt balance if it was paid
         if (item.isDebt && !item.debtKey.isNullOrBlank() && item.isPaid) {
             val debt = debtDao.getDebtByKey(item.debtKey)
-            if (debt != null) {
+            if (debt != null && debt.isHighInterest) {
                 debtDao.setDebtBalance(item.debtKey, debt.currentBalance + item.actualPaidAmount)
             }
         }
-
         triggerAchievementEvaluation()
     }
 
     suspend fun updateRecurringDefault(commitmentId: Long, newDefault: Double) = withContext(Dispatchers.IO) {
         commitmentDao.updateDefaultAmount(commitmentId, newDefault)
+    }
+
+    // --- MY SAVINGS VAULT OPERATIONS ---
+    suspend fun addSavingsAccount(
+        name: String,
+        purpose: String,
+        isEmergencyFund: Boolean,
+        initialBalance: Double,
+        expectedReturn: Double?
+    ): Long = withContext(Dispatchers.IO) {
+        val account = SavingsAccountEntity(
+            name = name,
+            purpose = purpose,
+            isEmergencyFund = isEmergencyFund,
+            currentBalance = initialBalance,
+            expectedAnnualReturnPercent = expectedReturn,
+            totalInterestCredited = 0.0,
+            createdTimestamp = System.currentTimeMillis()
+        )
+        val id = savingsAccountDao.insert(account)
+        if (initialBalance > 0) {
+            savingsTransactionDao.insert(
+                SavingsTransactionEntity(
+                    accountId = id,
+                    type = "DEPOSIT",
+                    amount = initialBalance,
+                    fromEverydayCash = false,
+                    note = "Initial balance"
+                )
+            )
+        }
+        syncDedicatedSavingsToProfile()
+        triggerAchievementEvaluation()
+        id
+    }
+
+    suspend fun depositToSavings(
+        accountId: Long,
+        amount: Double,
+        fromEverydayCash: Boolean,
+        note: String
+    ) = withContext(Dispatchers.IO) {
+        val account = savingsAccountDao.getAccountById(accountId) ?: return@withContext
+        val newBalance = account.currentBalance + amount
+        savingsAccountDao.update(account.copy(currentBalance = newBalance))
+
+        savingsTransactionDao.insert(
+            SavingsTransactionEntity(
+                accountId = accountId,
+                type = "DEPOSIT",
+                amount = amount,
+                fromEverydayCash = fromEverydayCash,
+                note = note
+            )
+        )
+
+        // Internal transfer: deduct from everyday cash without double-counting as an expense
+        if (fromEverydayCash) {
+            val profile = profileDao.getProfileDirect() ?: FinancialProfileEntity()
+            val newBankBalance = maxOf(0.0, profile.bankBalance - amount)
+            profileDao.updateBankBalance(newBankBalance)
+        }
+
+        syncDedicatedSavingsToProfile()
+        triggerAchievementEvaluation()
+    }
+
+    suspend fun withdrawFromSavings(
+        accountId: Long,
+        amount: Double,
+        toEverydayCash: Boolean,
+        note: String
+    ) = withContext(Dispatchers.IO) {
+        val account = savingsAccountDao.getAccountById(accountId) ?: return@withContext
+        val newBalance = maxOf(0.0, account.currentBalance - amount)
+        savingsAccountDao.update(account.copy(currentBalance = newBalance))
+
+        savingsTransactionDao.insert(
+            SavingsTransactionEntity(
+                accountId = accountId,
+                type = "WITHDRAWAL",
+                amount = amount,
+                fromEverydayCash = toEverydayCash,
+                note = note
+            )
+        )
+
+        // Internal transfer to everyday cash
+        if (toEverydayCash) {
+            val profile = profileDao.getProfileDirect() ?: FinancialProfileEntity()
+            profileDao.updateBankBalance(profile.bankBalance + amount)
+        }
+
+        syncDedicatedSavingsToProfile()
+        triggerAchievementEvaluation()
+    }
+
+    suspend fun creditInterestToSavings(
+        accountId: Long,
+        interestAmount: Double,
+        note: String
+    ) = withContext(Dispatchers.IO) {
+        val account = savingsAccountDao.getAccountById(accountId) ?: return@withContext
+        val newBalance = account.currentBalance + interestAmount
+        val newTotalInterest = account.totalInterestCredited + interestAmount
+        savingsAccountDao.update(account.copy(currentBalance = newBalance, totalInterestCredited = newTotalInterest))
+
+        savingsTransactionDao.insert(
+            SavingsTransactionEntity(
+                accountId = accountId,
+                type = "INTEREST",
+                amount = interestAmount,
+                fromEverydayCash = false,
+                note = if (note.isBlank()) "Credited return / dividend" else note
+            )
+        )
+
+        syncDedicatedSavingsToProfile()
+        triggerAchievementEvaluation()
+    }
+
+    private suspend fun syncDedicatedSavingsToProfile() {
+        val accounts = savingsAccountDao.getAllAccountsDirect()
+        val totalDedicated = accounts.sumOf { it.currentBalance }
+        profileDao.updateDedicatedSavings(totalDedicated)
+    }
+
+    // --- MONTHLY INCOME CHECK-IN ---
+    suspend fun saveMonthlyIncome(income: MonthlyIncomeEntity) = withContext(Dispatchers.IO) {
+        monthlyIncomeDao.insertOrUpdate(income)
+    }
+
+    // --- FLOWCHART STEP VERIFICATION ---
+    suspend fun setStepVerification(stepNumber: Int, isConfirmed: Boolean, notes: String = "") = withContext(Dispatchers.IO) {
+        flowchartVerificationDao.setVerification(
+            FlowchartVerificationEntity(
+                stepNumber = stepNumber,
+                isConfirmed = isConfirmed,
+                confirmedTimestamp = if (isConfirmed) System.currentTimeMillis() else null,
+                notes = notes
+            )
+        )
+        triggerAchievementEvaluation()
     }
 
     suspend fun updateProfile(profile: FinancialProfileEntity) = withContext(Dispatchers.IO) {
@@ -232,12 +410,20 @@ class FinancialRepository(private val context: Context) {
         val profile = profileDao.getProfileDirect() ?: FinancialProfileEntity()
         val debts = debtDao.getAllDebtsDirect()
         val expensesCount = expenseDao.getTotalExpenseCount()
-        AchievementEngine.checkAndUnlockAchievements(achievementDao, profile, debts, expensesCount)
+        val emergencySavings = savingsAccountDao.getTotalEmergencyFundDirect() ?: 0.0
+        val accounts = savingsAccountDao.getAllAccountsDirect()
+        val totalDedicated = accounts.sumOf { it.currentBalance }
+
+        AchievementEngine.checkAndUnlockAchievements(
+            achievementDao = achievementDao,
+            profile = profile,
+            debts = debts,
+            totalExpensesCount = expensesCount,
+            dedicatedEmergencySavings = emergencySavings,
+            dedicatedTotalSavings = totalDedicated
+        )
     }
 
-    /**
-     * Compute comprehensive Monthly Review Summary for any selected month.
-     */
     suspend fun getMonthlySummary(monthKey: String): MonthlySummaryData = withContext(Dispatchers.IO) {
         val profile = profileDao.getProfileDirect() ?: FinancialProfileEntity()
         val debts = debtDao.getAllDebtsDirect()
@@ -245,9 +431,18 @@ class FinancialRepository(private val context: Context) {
         val checkIns = monthlyCheckInDao.getCheckInsForMonthDirect(monthKey)
         val checkInMap = checkIns.associateBy { it.commitmentId }
 
-        val isDec = DateUtils.isDecember(monthKey)
-        val bonus = if (isDec) profile.basicSalary else 0.0
-        val totalIncome = profile.netMonthlySalary + bonus
+        val incomeRecord = monthlyIncomeDao.getIncomeForMonthDirect(monthKey)
+        val grossSalary = incomeRecord?.grossSalary ?: profile.basicSalary
+        val netSalary = incomeRecord?.netSalary ?: profile.netMonthlySalary
+        val variableIncome = (incomeRecord?.overtime ?: 0.0) + (incomeRecord?.incentives ?: 0.0) +
+                (incomeRecord?.thirteenthMonth ?: 0.0) + (incomeRecord?.otherIncome ?: 0.0)
+        val totalIncome = netSalary + variableIncome
+
+        val kwspBreakdown = KwspCalculator.calculateKwsp(
+            grossSalary = grossSalary,
+            actualEmployeeAmount = incomeRecord?.actualEmployeeKwsp,
+            actualEmployerAmount = incomeRecord?.actualEmployerKwsp
+        )
 
         val plannedCommitments = commitments.sumOf { it.defaultAmount }
         var paidCommitments = 0.0
@@ -271,11 +466,15 @@ class FinancialRepository(private val context: Context) {
         val currentDebt = debts.sumOf { it.currentBalance }
         val debtReduction = maxOf(0.0, initialDebt - currentDebt)
 
+        val emergencySavings = savingsAccountDao.getTotalEmergencyFundDirect() ?: 0.0
+        val accounts = savingsAccountDao.getAllAccountsDirect()
+        val totalDedicated = accounts.sumOf { it.currentBalance }
+
         MonthlySummaryData(
             monthKey = monthKey,
-            netSalary = profile.netMonthlySalary,
-            isDecemberBonusMonth = isDec,
-            thirteenthMonthBonus = bonus,
+            grossSalary = grossSalary,
+            netSalary = netSalary,
+            variableIncome = variableIncome,
             totalIncome = totalIncome,
             plannedCommitments = plannedCommitments,
             paidCommitments = paidCommitments,
@@ -286,21 +485,21 @@ class FinancialRepository(private val context: Context) {
             remainingCashflow = remainingCashflow,
             totalDebtRemaining = currentDebt,
             totalDebtReduction = debtReduction,
-            accessibleSavings = profile.totalAccessibleSavings,
-            totalKwsp = profile.totalKwsp
+            everydayCash = profile.bankBalance,
+            dedicatedSavings = totalDedicated,
+            dedicatedEmergencyFund = emergencySavings,
+            totalKwsp = profile.totalKwsp,
+            kwspBreakdown = kwspBreakdown
         )
     }
 
-    /**
-     * JSON Backup Export
-     */
     suspend fun exportDataAsJson(): String = withContext(Dispatchers.IO) {
         val root = JSONObject()
         val profile = profileDao.getProfileDirect() ?: FinancialProfileEntity()
         val debts = debtDao.getAllDebtsDirect()
         val commitments = commitmentDao.getAllCommitmentsDirect()
+        val savings = savingsAccountDao.getAllAccountsDirect()
 
-        // Profile json
         val profileObj = JSONObject().apply {
             put("netMonthlySalary", profile.netMonthlySalary)
             put("basicSalary", profile.basicSalary)
@@ -316,7 +515,6 @@ class FinancialRepository(private val context: Context) {
         }
         root.put("profile", profileObj)
 
-        // Debts json
         val debtsArray = JSONArray()
         debts.forEach { d ->
             val obj = JSONObject().apply {
@@ -332,7 +530,6 @@ class FinancialRepository(private val context: Context) {
         }
         root.put("debts", debtsArray)
 
-        // Commitments json
         val commitmentsArray = JSONArray()
         commitments.forEach { c ->
             val obj = JSONObject().apply {
@@ -346,14 +543,26 @@ class FinancialRepository(private val context: Context) {
         }
         root.put("commitments", commitmentsArray)
 
+        val savingsArray = JSONArray()
+        savings.forEach { s ->
+            val obj = JSONObject().apply {
+                put("id", s.id)
+                put("name", s.name)
+                put("purpose", s.purpose)
+                put("isEmergencyFund", s.isEmergencyFund)
+                put("currentBalance", s.currentBalance)
+                put("totalInterestCredited", s.totalInterestCredited)
+            }
+            savingsArray.put(obj)
+        }
+        root.put("savings_accounts", savingsArray)
+
+        root.put("appName", "Project 41")
+        root.put("version", "2.0")
         root.put("exportedAt", System.currentTimeMillis())
-        root.put("version", "1.0")
         root.toString(2)
     }
 
-    /**
-     * JSON Backup Restore
-     */
     suspend fun restoreDataFromJson(jsonStr: String): Boolean = withContext(Dispatchers.IO) {
         try {
             val root = JSONObject(jsonStr)
@@ -397,6 +606,7 @@ class FinancialRepository(private val context: Context) {
                 }
             }
 
+            syncDedicatedSavingsToProfile()
             triggerAchievementEvaluation()
             ExpenseWidgetProvider.updateAllWidgets(context)
             true

@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Freedom Tracker"
+rootProject.name = "Project 41"
 
 include(":app")

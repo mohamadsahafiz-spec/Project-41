@@ -10,12 +10,13 @@ object AchievementEngine {
         achievementDao: AchievementDao,
         profile: FinancialProfileEntity,
         debts: List<DebtEntity>,
-        totalExpensesCount: Int
+        totalExpensesCount: Int,
+        dedicatedEmergencySavings: Double,
+        dedicatedTotalSavings: Double
     ) {
         val now = System.currentTimeMillis()
         val totalDebt = debts.sumOf { it.currentBalance }
         val highInterestDebt = debts.filter { it.isHighInterest }.sumOf { it.currentBalance }
-        val accessibleSavings = profile.totalAccessibleSavings
         val totalKwsp = profile.totalKwsp
 
         val sloan = debts.firstOrNull { it.key == "SHOPEE_SLOAN" }
@@ -23,18 +24,20 @@ object AchievementEngine {
         val hp1 = debts.firstOrNull { it.key == "HL_HP1" }
         val hp2 = debts.firstOrNull { it.key == "AMBANK_HP2" }
 
-        // 1. First Expense
+        // 1. First Expense recorded
         if (totalExpensesCount > 0) {
             achievementDao.unlock("FIRST_EXPENSE", now)
         }
 
-        // 2. Starter buffer (RM1,000)
-        if (accessibleSavings >= 1000.0) {
+        // 2. Starter Buffer (RM1,000):
+        // MANDATE: Unlock ONLY when dedicated emergency savings reach RM1,000.
+        // Ordinary bank balance (Everyday Cash) does NOT count!
+        if (dedicatedEmergencySavings >= 1000.0) {
             achievementDao.unlock("STARTER_EMERGENCY", now)
         }
 
-        // 3. Dedicated savings >= RM500
-        if (profile.dedicatedSavings >= 500.0 || accessibleSavings >= 1500.0) {
+        // 3. First RM500 Saved in dedicated savings vault
+        if (dedicatedTotalSavings >= 500.0) {
             achievementDao.unlock("SAVINGS_500", now)
         }
 
@@ -53,13 +56,13 @@ object AchievementEngine {
             achievementDao.unlock("CONSUMER_DEBT_FREE", now)
         }
 
-        // 7. 1-Month Emergency Fund (~RM3,300)
-        if (accessibleSavings >= 3300.0) {
+        // 7. 1-Month Emergency Fund (~RM3,300 in dedicated emergency savings)
+        if (dedicatedEmergencySavings >= 3300.0) {
             achievementDao.unlock("ONE_MONTH_EMERGENCY", now)
         }
 
-        // 8. 3-Month Emergency Fund (~RM10,000)
-        if (accessibleSavings >= 10000.0) {
+        // 8. 3-Month Emergency Fund (~RM10,000 in dedicated emergency savings)
+        if (dedicatedEmergencySavings >= 10000.0) {
             achievementDao.unlock("THREE_MONTH_EMERGENCY", now)
         }
 
@@ -78,8 +81,8 @@ object AchievementEngine {
             achievementDao.unlock("TOTAL_DEBT_FREE", now)
         }
 
-        // 12. 6-Month Emergency Fund (~RM20,000)
-        if (accessibleSavings >= 20000.0) {
+        // 12. 6-Month Emergency Fund (~RM20,000 in dedicated emergency savings)
+        if (dedicatedEmergencySavings >= 20000.0) {
             achievementDao.unlock("SIX_MONTH_EMERGENCY", now)
         }
 
@@ -89,7 +92,7 @@ object AchievementEngine {
         }
 
         // 14. Financial Freedom Foundation (Step 6 reached)
-        if (highInterestDebt <= 0.01 && accessibleSavings >= 10000.0) {
+        if (highInterestDebt <= 0.01 && dedicatedEmergencySavings >= 10000.0) {
             achievementDao.unlock("FINANCIAL_FREEDOM_FOUNDATION", now)
         }
     }

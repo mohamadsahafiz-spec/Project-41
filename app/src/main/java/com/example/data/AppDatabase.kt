@@ -10,16 +10,21 @@ import com.example.data.dao.CommitmentDao
 import com.example.data.dao.DebtDao
 import com.example.data.dao.ExpenseDao
 import com.example.data.dao.FinancialProfileDao
+import com.example.data.dao.FlowchartVerificationDao
 import com.example.data.dao.MonthlyCheckInDao
+import com.example.data.dao.MonthlyIncomeDao
+import com.example.data.dao.SavingsAccountDao
+import com.example.data.dao.SavingsTransactionDao
 import com.example.data.model.AchievementEntity
 import com.example.data.model.CommitmentEntity
 import com.example.data.model.DebtEntity
 import com.example.data.model.ExpenseEntity
 import com.example.data.model.FinancialProfileEntity
+import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyCheckInEntity
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import com.example.data.model.MonthlyIncomeEntity
+import com.example.data.model.SavingsAccountEntity
+import com.example.data.model.SavingsTransactionEntity
 
 @Database(
     entities = [
@@ -28,9 +33,13 @@ import kotlinx.coroutines.launch
         MonthlyCheckInEntity::class,
         FinancialProfileEntity::class,
         DebtEntity::class,
-        AchievementEntity::class
+        AchievementEntity::class,
+        SavingsAccountEntity::class,
+        SavingsTransactionEntity::class,
+        MonthlyIncomeEntity::class,
+        FlowchartVerificationEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -40,6 +49,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun financialProfileDao(): FinancialProfileDao
     abstract fun debtDao(): DebtDao
     abstract fun achievementDao(): AchievementDao
+    abstract fun savingsAccountDao(): SavingsAccountDao
+    abstract fun savingsTransactionDao(): SavingsTransactionDao
+    abstract fun monthlyIncomeDao(): MonthlyIncomeDao
+    abstract fun flowchartVerificationDao(): FlowchartVerificationDao
 
     companion object {
         @Volatile
@@ -50,7 +63,7 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "freedom_tracker_db"
+                    "freedom_tracker_db" // Preserving database name to preserve existing data
                 )
                     .addCallback(DatabasePrepopulateCallback())
                     .fallbackToDestructiveMigration()
@@ -64,10 +77,9 @@ abstract class AppDatabase : RoomDatabase() {
     private class DatabasePrepopulateCallback : Callback() {
         override fun onCreate(db: SupportSQLiteDatabase) {
             super.onCreate(db)
-            // Prepopulate initial values directly via SQL to guarantee atomic readiness
             db.beginTransaction()
             try {
-                // Initial Profile
+                // Initial Profile: Everyday Cash = RM1,039.56, Dedicated Savings = RM0.00
                 db.execSQL(
                     """
                     INSERT INTO financial_profile (
@@ -82,7 +94,7 @@ abstract class AppDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
 
-                // Initial Debts
+                // Initial Debts:
                 db.execSQL(
                     """
                     INSERT INTO debts (`key`, name, initialBalance, currentBalance, monthlyTarget, aprPercent, isHighInterest)
@@ -94,7 +106,7 @@ abstract class AppDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
 
-                // Initial Recurring Commitments
+                // Initial Commitments:
                 db.execSQL(
                     """
                     INSERT INTO commitments (name, defaultAmount, isDebt, debtKey)
@@ -111,27 +123,35 @@ abstract class AppDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
 
-                // Initial Achievements
-                val now = System.currentTimeMillis()
-                // Starter Emergency Fund is already unlocked because user starts with RM1,039.56 >= RM1,000!
+                // Initial Achievements:
+                // STARTER_EMERGENCY must be LOCKED (0) because dedicated emergency savings is RM0!
                 db.execSQL(
                     """
                     INSERT INTO achievements (`key`, title, description, category, isUnlocked, unlockedTimestamp)
                     VALUES 
                     ('FIRST_EXPENSE', 'First Step Taken', 'Record your first quick expense entry.', 'Habit', 0, NULL),
-                    ('STARTER_EMERGENCY', 'Starter Buffer', 'Hold at least RM1,000 liquid emergency buffer (Flowchart Step 1).', 'Savings', 1, $now),
-                    ('SAVINGS_500', 'First RM500 Saved', 'Build RM500 in dedicated liquid savings reserve.', 'Savings', 0, NULL),
+                    ('STARTER_EMERGENCY', 'Starter Buffer', 'Reach RM1,000 in dedicated emergency reserve (Flowchart Step 1).', 'Savings', 0, NULL),
+                    ('SAVINGS_500', 'First RM500 Saved', 'Build RM500 in dedicated emergency savings reserve.', 'Savings', 0, NULL),
                     ('SLOAN_CLEARED', 'SLoan Liberated', 'Fully clear the Shopee SLoan balance to RM0.', 'Debt', 0, NULL),
                     ('CREDIT_CARD_CLEARED', 'Credit Card Zeroed', 'Maybank credit card debt completely paid off.', 'Debt', 0, NULL),
                     ('CONSUMER_DEBT_FREE', 'High-Interest Free', 'All high-interest debt eliminated! Flowchart Step 3 completed.', 'Debt', 0, NULL),
-                    ('ONE_MONTH_EMERGENCY', '1-Month Safety Buffer', 'Accumulate 1 month of living expenses in liquid savings (~RM3,300).', 'Savings', 0, NULL),
-                    ('THREE_MONTH_EMERGENCY', '3-Month Solid Defense', 'Accumulate 3 months of emergency expenses in liquid savings (~RM10,000).', 'Savings', 0, NULL),
+                    ('ONE_MONTH_EMERGENCY', '1-Month Safety Buffer', 'Accumulate 1 month of living expenses in dedicated savings (~RM3,300).', 'Savings', 0, NULL),
+                    ('THREE_MONTH_EMERGENCY', '3-Month Solid Defense', 'Accumulate 3 months of emergency expenses in dedicated savings (~RM10,000).', 'Savings', 0, NULL),
                     ('HP1_CLEARED', 'Car HP1 Settled', 'Hong Leong vehicle hire purchase fully settled.', 'Debt', 0, NULL),
                     ('HP2_CLEARED', 'Car HP2 Settled', 'AmBank vehicle hire purchase fully settled.', 'Debt', 0, NULL),
                     ('TOTAL_DEBT_FREE', '100% Debt Free', 'Zero debt! Both credit cards and cars cleared. Flowchart Step 5 completed.', 'Debt', 0, NULL),
-                    ('SIX_MONTH_EMERGENCY', 'Ironclad Emergency Reserve', 'Accumulate 6 months of living expenses in liquid savings (~RM20,000).', 'Savings', 0, NULL),
+                    ('SIX_MONTH_EMERGENCY', 'Ironclad Emergency Reserve', 'Accumulate 6 months of living expenses in dedicated savings (~RM20,000).', 'Savings', 0, NULL),
                     ('KWSP_100K', 'KWSP Milestone', 'Total KWSP retirement balance exceeds RM100,000.', 'Retirement', 0, NULL),
                     ('FINANCIAL_FREEDOM_FOUNDATION', 'Freedom Horizon', 'Positive net worth advancing into Step 6 long-term investments.', 'Milestone', 0, NULL)
+                    """.trimIndent()
+                )
+
+                // Initial Savings Vault: Default Emergency Fund account (balance RM0)
+                db.execSQL(
+                    """
+                    INSERT INTO savings_accounts (name, purpose, isEmergencyFund, currentBalance, expectedAnnualReturnPercent, totalInterestCredited, createdTimestamp)
+                    VALUES 
+                    ('Emergency Fund (High-Yield / Liquid)', 'Emergency Fund', 1, 0.0, 3.5, 0.0, ${System.currentTimeMillis()})
                     """.trimIndent()
                 )
 

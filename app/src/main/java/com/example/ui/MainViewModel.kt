@@ -10,6 +10,9 @@ import com.example.data.model.AchievementEntity
 import com.example.data.model.DebtEntity
 import com.example.data.model.ExpenseEntity
 import com.example.data.model.FinancialProfileEntity
+import com.example.data.model.FlowchartVerificationEntity
+import com.example.data.model.MonthlyIncomeEntity
+import com.example.data.model.SavingsAccountEntity
 import com.example.logic.FlowchartCalculator
 import com.example.logic.FlowchartJourneyState
 import com.example.util.DateUtils
@@ -51,7 +54,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             SharingStarted.WhileSubscribed(5000),
             FinancialProfileEntity()
         ).let { flow ->
-            // Map null to default entity
             MutableStateFlow(FinancialProfileEntity()).apply {
                 viewModelScope.launch {
                     flow.collect { value = it ?: FinancialProfileEntity() }
@@ -66,7 +68,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5000),
-            FlowchartCalculator.calculateJourney(FinancialProfileEntity(), emptyList())
+            FlowchartCalculator.calculateJourney(FinancialProfileEntity(), emptyList(), 0.0, 0.0)
         )
 
     val achievements: StateFlow<List<AchievementEntity>> = repository.achievementsFlow
@@ -81,6 +83,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val commitmentItems: StateFlow<List<MonthlyCommitmentItem>> = _selectedMonthKey
         .flatMapLatest { key -> repository.getCommitmentItemsForMonth(key) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // My Savings Vault StateFlows
+    val savingsAccounts: StateFlow<List<SavingsAccountEntity>> = repository.savingsAccountsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val totalDedicatedSavings: StateFlow<Double> = repository.totalDedicatedSavingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val totalEmergencyFund: StateFlow<Double> = repository.totalEmergencyFundFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val totalInterestCredited: StateFlow<Double> = repository.totalInterestCreditedFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val currentMonthIncome: StateFlow<MonthlyIncomeEntity?> = _selectedMonthKey
+        .flatMapLatest { key -> repository.getIncomeForMonth(key) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val flowchartVerifications: StateFlow<List<FlowchartVerificationEntity>> = repository.flowchartVerificationsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -131,26 +153,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun toggleCommitment(item: MonthlyCommitmentItem) {
+    /**
+     * Poka-Yoke confirmation of batch payments
+     */
+    fun confirmBatchPayments(payments: List<Pair<MonthlyCommitmentItem, Double>>) {
         viewModelScope.launch {
             val month = _selectedMonthKey.value
-            if (item.isPaid) {
-                repository.unmarkCommitmentPaid(item, month)
-                _eventFlow.emit(UiEvent.ShowSnackbar("Marked '${item.name}' unpaid"))
-            } else {
-                repository.markCommitmentPaid(item, month, item.defaultAmount)
-                _eventFlow.emit(UiEvent.ShowSnackbar("Paid '${item.name}' (${DateUtils.formatCurrency(item.defaultAmount)})"))
-            }
+            repository.confirmBatchPayments(month, payments)
             refreshMonthlySummary(month)
+            _eventFlow.emit(UiEvent.ShowSnackbar("Recorded ${payments.size} payments as confirmed"))
         }
     }
 
-    fun payCustomCommitment(item: MonthlyCommitmentItem, customAmount: Double) {
+    fun unmarkCommitment(item: MonthlyCommitmentItem) {
         viewModelScope.launch {
             val month = _selectedMonthKey.value
-            repository.markCommitmentPaid(item, month, customAmount)
+            repository.unmarkCommitmentPaid(item, month)
             refreshMonthlySummary(month)
-            _eventFlow.emit(UiEvent.ShowSnackbar("Recorded ${DateUtils.formatCurrency(customAmount)} paid for '${item.name}'"))
+            _eventFlow.emit(UiEvent.ShowSnackbar("Unmarked '${item.name}'"))
         }
     }
 
@@ -159,6 +179,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.updateRecurringDefault(item.commitmentId, newDefault)
             refreshMonthlySummary(_selectedMonthKey.value)
             _eventFlow.emit(UiEvent.ShowSnackbar("Updated monthly recurring default to ${DateUtils.formatCurrency(newDefault)}"))
+        }
+    }
+
+    // --- My Savings Vault Actions ---
+    fun addSavingsAccount(name: String, purpose: String, isEmergency: Boolean, initialBal: Double, ret: Double?) {
+        viewModelScope.launch {
+            repository.addSavingsAccount(name, purpose, isEmergency, initialBal, ret)
+            refreshMonthlySummary(_selectedMonthKey.value)
+            _eventFlow.emit(UiEvent.ShowSnackbar("Created account '$name' in My Savings Vault"))
+        }
+    }
+
+    fun depositToSavings(accountId: Long, amount: Double, fromEverydayCash: Boolean, note: String) {
+        viewModelScope.launch {
+            repository.depositToSavings(accountId, amount, fromEverydayCash, note)
+            refreshMonthlySummary(_selectedMonthKey.value)
+            val msg = if (fromEverydayCash) {
+                "Transferred ${DateUtils.formatCurrency(amount)} from Everyday Cash to Savings Vault"
+            } else {
+                "Deposited ${DateUtils.formatCurrency(amount)} to Savings Vault"
+            }
+            _eventFlow.emit(UiEvent.ShowSnackbar(msg))
+        }
+    }
+
+    fun withdrawFromSavings(accountId: Long, amount: Double, toEverydayCash: Boolean, note: String) {
+        viewModelScope.launch {
+            repository.withdrawFromSavings(accountId, amount, toEverydayCash, note)
+            refreshMonthlySummary(_selectedMonthKey.value)
+            _eventFlow.emit(UiEvent.ShowSnackbar("Withdrew ${DateUtils.formatCurrency(amount)} from Savings Vault"))
+        }
+    }
+
+    fun creditInterestToSavings(accountId: Long, amount: Double, note: String) {
+        viewModelScope.launch {
+            repository.creditInterestToSavings(accountId, amount, note)
+            refreshMonthlySummary(_selectedMonthKey.value)
+            _eventFlow.emit(UiEvent.ShowSnackbar("Credited +${DateUtils.formatCurrency(amount)} verified growth"))
+        }
+    }
+
+    // --- Monthly Income Actions ---
+    fun saveMonthlyIncome(income: MonthlyIncomeEntity) {
+        viewModelScope.launch {
+            repository.saveMonthlyIncome(income)
+            refreshMonthlySummary(_selectedMonthKey.value)
+            _eventFlow.emit(UiEvent.ShowSnackbar("Saved monthly income & KWSP figures for ${DateUtils.formatMonthKey(income.monthKey)}"))
+        }
+    }
+
+    // --- Flowchart Verification ---
+    fun confirmStepVerification(stepNumber: Int, isConfirmed: Boolean, notes: String) {
+        viewModelScope.launch {
+            repository.setStepVerification(stepNumber, isConfirmed, notes)
+            refreshMonthlySummary(_selectedMonthKey.value)
+            _eventFlow.emit(UiEvent.ShowSnackbar("Updated Step $stepNumber verification status"))
         }
     }
 

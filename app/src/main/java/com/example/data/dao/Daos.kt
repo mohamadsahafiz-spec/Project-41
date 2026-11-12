@@ -11,7 +11,11 @@ import com.example.data.model.CommitmentEntity
 import com.example.data.model.DebtEntity
 import com.example.data.model.ExpenseEntity
 import com.example.data.model.FinancialProfileEntity
+import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyCheckInEntity
+import com.example.data.model.MonthlyIncomeEntity
+import com.example.data.model.SavingsAccountEntity
+import com.example.data.model.SavingsTransactionEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -96,6 +100,12 @@ interface FinancialProfileDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(profile: FinancialProfileEntity)
+
+    @Query("UPDATE financial_profile SET bankBalance = :newBal WHERE id = 1")
+    suspend fun updateBankBalance(newBal: Double)
+
+    @Query("UPDATE financial_profile SET dedicatedSavings = :newDedicated WHERE id = 1")
+    suspend fun updateDedicatedSavings(newDedicated: Double)
 }
 
 @Dao
@@ -138,4 +148,85 @@ interface AchievementDao {
 
     @Query("UPDATE achievements SET isUnlocked = 1, unlockedTimestamp = :timestamp WHERE `key` = :key AND isUnlocked = 0")
     suspend fun unlock(key: String, timestamp: Long): Int
+
+    @Query("UPDATE achievements SET isUnlocked = 0, unlockedTimestamp = NULL WHERE `key` = :key")
+    suspend fun lock(key: String): Int
+}
+
+/**
+ * MY SAVINGS VAULT DAOS
+ */
+@Dao
+interface SavingsAccountDao {
+    @Query("SELECT * FROM savings_accounts ORDER BY isEmergencyFund DESC, id ASC")
+    fun getAllAccounts(): Flow<List<SavingsAccountEntity>>
+
+    @Query("SELECT * FROM savings_accounts ORDER BY isEmergencyFund DESC, id ASC")
+    suspend fun getAllAccountsDirect(): List<SavingsAccountEntity>
+
+    @Query("SELECT * FROM savings_accounts WHERE id = :id LIMIT 1")
+    suspend fun getAccountById(id: Long): SavingsAccountEntity?
+
+    @Query("SELECT SUM(currentBalance) FROM savings_accounts")
+    fun getTotalDedicatedSavings(): Flow<Double?>
+
+    @Query("SELECT SUM(currentBalance) FROM savings_accounts WHERE isEmergencyFund = 1")
+    fun getTotalEmergencyFund(): Flow<Double?>
+
+    @Query("SELECT SUM(currentBalance) FROM savings_accounts WHERE isEmergencyFund = 1")
+    suspend fun getTotalEmergencyFundDirect(): Double?
+
+    @Query("SELECT SUM(totalInterestCredited) FROM savings_accounts")
+    fun getTotalInterestCredited(): Flow<Double?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(account: SavingsAccountEntity): Long
+
+    @Update
+    suspend fun update(account: SavingsAccountEntity)
+
+    @Delete
+    suspend fun delete(account: SavingsAccountEntity)
+}
+
+@Dao
+interface SavingsTransactionDao {
+    @Query("SELECT * FROM savings_transactions WHERE accountId = :accountId ORDER BY timestamp DESC")
+    fun getTransactionsForAccount(accountId: Long): Flow<List<SavingsTransactionEntity>>
+
+    @Query("SELECT * FROM savings_transactions ORDER BY timestamp DESC LIMIT 50")
+    fun getAllTransactions(): Flow<List<SavingsTransactionEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(transaction: SavingsTransactionEntity): Long
+}
+
+/**
+ * Monthly Income Check-In DAO
+ */
+@Dao
+interface MonthlyIncomeDao {
+    @Query("SELECT * FROM monthly_incomes WHERE monthKey = :monthKey LIMIT 1")
+    fun getIncomeForMonth(monthKey: String): Flow<MonthlyIncomeEntity?>
+
+    @Query("SELECT * FROM monthly_incomes WHERE monthKey = :monthKey LIMIT 1")
+    suspend fun getIncomeForMonthDirect(monthKey: String): MonthlyIncomeEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(income: MonthlyIncomeEntity)
+}
+
+/**
+ * Flowchart Verification DAO
+ */
+@Dao
+interface FlowchartVerificationDao {
+    @Query("SELECT * FROM flowchart_verifications")
+    fun getAllVerifications(): Flow<List<FlowchartVerificationEntity>>
+
+    @Query("SELECT * FROM flowchart_verifications WHERE stepNumber = :step LIMIT 1")
+    suspend fun getVerificationForStep(step: Int): FlowchartVerificationEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun setVerification(verification: FlowchartVerificationEntity)
 }

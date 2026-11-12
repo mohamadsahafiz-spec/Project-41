@@ -19,10 +19,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -32,6 +36,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -43,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -55,28 +61,54 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.MonthlyCommitmentItem
+import com.example.data.model.MonthlyIncomeEntity
+import com.example.logic.KwspCalculator
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.SuccessGreen
+import com.example.ui.theme.WarningGold
 import com.example.util.DateUtils
 
 @Composable
 fun CommitmentsScreen(
     monthKey: String,
     items: List<MonthlyCommitmentItem>,
-    onToggleCommitment: (MonthlyCommitmentItem) -> Unit,
-    onPayCustomAmount: (MonthlyCommitmentItem, Double) -> Unit,
+    currentIncome: MonthlyIncomeEntity?,
+    onSaveIncome: (MonthlyIncomeEntity) -> Unit,
+    onConfirmBatchPayments: (List<Pair<MonthlyCommitmentItem, Double>>) -> Unit,
+    onUnmarkCommitment: (MonthlyCommitmentItem) -> Unit,
     onUpdateRecurringDefault: (MonthlyCommitmentItem, Double) -> Unit
 ) {
-    var customPayItem by remember { mutableStateOf<MonthlyCommitmentItem?>(null) }
+    var showIncomeSection by remember { mutableStateOf(false) }
     var updateDefaultItem by remember { mutableStateOf<MonthlyCommitmentItem?>(null) }
+    var showBatchConfirmDialog by remember { mutableStateOf(false) }
+
+    // Poka-Yoke in-memory selection state (NOT saved until CONFIRM button is pressed)
+    val selectedPayments = remember { mutableStateMapOf<Long, Double>() }
 
     val isCheckInActive = DateUtils.isCheckInPeriod()
     val formattedMonth = DateUtils.formatMonthKey(monthKey)
 
     val totalPlanned = items.sumOf { it.defaultAmount }
-    val totalPaid = items.filter { it.isPaid }.sumOf { it.actualPaidAmount }
-    val remaining = maxOf(0.0, totalPlanned - totalPaid)
-    val progress = if (totalPlanned > 0) (totalPaid / totalPlanned).toFloat() else 0f
+    val totalAlreadyPaid = items.filter { it.isPaid }.sumOf { it.actualPaidAmount }
+    val remaining = maxOf(0.0, totalPlanned - totalAlreadyPaid)
+
+    val selectedSum = selectedPayments.values.sum()
+
+    // Initialize or read Income inputs
+    var grossText by remember(currentIncome) { mutableStateOf((currentIncome?.grossSalary ?: 4158.00).toString()) }
+    var netText by remember(currentIncome) { mutableStateOf((currentIncome?.netSalary ?: 4460.50).toString()) }
+    var overtimeText by remember(currentIncome) { mutableStateOf((currentIncome?.overtime ?: 0.0).toString()) }
+    var incentivesText by remember(currentIncome) { mutableStateOf((currentIncome?.incentives ?: 0.0).toString()) }
+    var thirteenthMonthText by remember(currentIncome) { mutableStateOf((currentIncome?.thirteenthMonth ?: 0.0).toString()) }
+    var actualEmployeeKwspText by remember(currentIncome) { mutableStateOf(currentIncome?.actualEmployeeKwsp?.toString() ?: "") }
+    var actualEmployerKwspText by remember(currentIncome) { mutableStateOf(currentIncome?.actualEmployerKwsp?.toString() ?: "") }
+
+    val gross = grossText.toDoubleOrNull() ?: 4158.00
+    val kwspBreakdown = KwspCalculator.calculateKwsp(
+        grossSalary = gross,
+        actualEmployeeAmount = actualEmployeeKwspText.toDoubleOrNull(),
+        actualEmployerAmount = actualEmployerKwspText.toDoubleOrNull()
+    )
 
     LazyColumn(
         modifier = Modifier
@@ -86,8 +118,8 @@ fun CommitmentsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Spacer(modifier = Modifier.height(8.dp))
-            // Check-in window info badge
+            Spacer(modifier = Modifier.height(4.dp))
+            // Check-in status badge
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = if (isCheckInActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -108,9 +140,9 @@ fun CommitmentsScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (isCheckInActive) {
-                            "Monthly Check-In Window Active (27th - End of Month)"
+                            "Monthly Check-In Active (27th - End of Month)"
                         } else {
-                            "Check-in period is active from 27th to end of month. Defaults restore each month."
+                            "Check-in period is active from 27th to end of month. Defaults restore automatically."
                         },
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = if (isCheckInActive) FontWeight.Bold else FontWeight.Normal,
@@ -121,15 +153,230 @@ fun CommitmentsScreen(
             }
         }
 
-        // Summary Card: Total planned, paid, remaining
+        // MONTHLY INCOME CHECK-IN (Requirement 6)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showIncomeSection = !showIncomeSection },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBalance,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Monthly Income Check-In",
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                )
+                                Text(
+                                    text = "Gross: ${DateUtils.formatCurrency(gross)} • Net: ${DateUtils.formatCurrency(netText.toDoubleOrNull() ?: 4460.50)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                            }
+                        }
+
+                        IconButton(onClick = { showIncomeSection = !showIncomeSection }) {
+                            Icon(
+                                imageVector = if (showIncomeSection) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = "Toggle income section"
+                            )
+                        }
+                    }
+
+                    if (showIncomeSection) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = "Gross salary drives KWSP estimates. Net salary drives take-home cashflow.",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = grossText,
+                                onValueChange = { grossText = it },
+                                label = { Text("Gross Salary") },
+                                prefix = { Text("RM ") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            OutlinedTextField(
+                                value = netText,
+                                onValueChange = { netText = it },
+                                label = { Text("Net Take-Home") },
+                                prefix = { Text("RM ") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = overtimeText,
+                                onValueChange = { overtimeText = it },
+                                label = { Text("Overtime (Optional)") },
+                                prefix = { Text("RM ") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            OutlinedTextField(
+                                value = incentivesText,
+                                onValueChange = { incentivesText = it },
+                                label = { Text("Incentives") },
+                                prefix = { Text("RM ") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        if (DateUtils.isDecember(monthKey)) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = thirteenthMonthText,
+                                onValueChange = { thirteenthMonthText = it },
+                                label = { Text("13th-Month Guaranteed Bonus") },
+                                prefix = { Text("RM ") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // KWSP Statutory Contribution Summary
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = if (kwspBreakdown.isEstimated) "KWSP STATUTORY ESTIMATE (Third Schedule)" else "KWSP CONFIRMED (Payslip)",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Employee (11%): ${DateUtils.formatCurrency(kwspBreakdown.employeeAmount)} • Employer (13%): ${DateUtils.formatCurrency(kwspBreakdown.employerAmount)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = "Total KWSP: ${DateUtils.formatCurrency(kwspBreakdown.totalContribution)} (Acc 1 [75%]: ${DateUtils.formatCurrency(kwspBreakdown.account1Allocation)}, Acc 2 [15%]: ${DateUtils.formatCurrency(kwspBreakdown.account2Allocation)}, Acc 3 [10%]: ${DateUtils.formatCurrency(kwspBreakdown.account3Allocation)})",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = actualEmployeeKwspText,
+                                onValueChange = { actualEmployeeKwspText = it },
+                                label = { Text("Payslip Employee EPF") },
+                                placeholder = { Text("Override") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = actualEmployerKwspText,
+                                onValueChange = { actualEmployerKwspText = it },
+                                label = { Text("Payslip Employer EPF") },
+                                placeholder = { Text("Override") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Button(
+                            onClick = {
+                                val income = MonthlyIncomeEntity(
+                                    monthKey = monthKey,
+                                    grossSalary = grossText.toDoubleOrNull() ?: 4158.0,
+                                    netSalary = netText.toDoubleOrNull() ?: 4460.50,
+                                    overtime = overtimeText.toDoubleOrNull() ?: 0.0,
+                                    incentives = incentivesText.toDoubleOrNull() ?: 0.0,
+                                    thirteenthMonth = thirteenthMonthText.toDoubleOrNull() ?: 0.0,
+                                    actualEmployeeKwsp = actualEmployeeKwspText.toDoubleOrNull(),
+                                    actualEmployerKwsp = actualEmployerKwspText.toDoubleOrNull()
+                                )
+                                onSaveIncome(income)
+                                showIncomeSection = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Save Monthly Income")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Summary Card: Total planned, paid, remaining, selected
         item {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("commitments_summary_card"),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(20.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
@@ -190,7 +437,7 @@ fun CommitmentsScreen(
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = "TOTAL PAID",
+                                text = "RECORDED PAID",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.SemiBold,
                                     color = SuccessGreen,
@@ -198,7 +445,7 @@ fun CommitmentsScreen(
                                 )
                             )
                             Text(
-                                text = DateUtils.formatCurrency(totalPaid),
+                                text = DateUtils.formatCurrency(totalAlreadyPaid),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = SuccessGreen
@@ -223,45 +470,190 @@ fun CommitmentsScreen(
                             )
                         }
                     }
+                }
+            }
+        }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    LinearProgressIndicator(
-                        progress = { progress.coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(8.dp)
-                            .clip(RoundedCornerShape(4.dp)),
-                        color = SuccessGreen,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+        // Poka-Yoke Selection Header & Instructions
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Poka-Yoke: Select items below to prepare payment. Payments are only committed when you tap 'CONFIRM MONTHLY PAYMENTS'.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     )
                 }
             }
         }
 
-        // List of commitments
+        // List of commitment items
         items(items, key = { it.commitmentId }) { item ->
-            CommitmentRowItem(
+            val isSelectedInBatch = selectedPayments.containsKey(item.commitmentId)
+            val currentPayAmount = selectedPayments[item.commitmentId] ?: item.defaultAmount
+
+            PokaYokeCommitmentRowItem(
                 item = item,
-                onToggle = { onToggleCommitment(item) },
-                onCustomPayClick = { customPayItem = item },
+                isSelectedInBatch = isSelectedInBatch,
+                batchAmount = currentPayAmount,
+                onToggleSelection = {
+                    if (item.isPaid) {
+                        // If already marked paid, tapping allows unmarking
+                        onUnmarkCommitment(item)
+                    } else {
+                        // Toggle in-memory selection
+                        if (isSelectedInBatch) {
+                            selectedPayments.remove(item.commitmentId)
+                        } else {
+                            selectedPayments[item.commitmentId] = item.defaultAmount
+                        }
+                    }
+                },
+                onAmountChange = { newAmt ->
+                    selectedPayments[item.commitmentId] = newAmt
+                },
                 onUpdateDefaultClick = { updateDefaultItem = item }
             )
         }
 
+        // POKA-YOKE CONFIRMATION BUTTON (Requirement 5)
         item {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+            if (selectedPayments.isNotEmpty()) {
+                Button(
+                    onClick = { showBatchConfirmDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("confirm_monthly_payments_btn"),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "CONFIRM MONTHLY PAYMENTS (${selectedPayments.size} • ${DateUtils.formatCurrency(selectedSum)})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 
-    // Dialog: Custom Payment Amount (Temporary for this month only)
-    customPayItem?.let { item ->
-        CustomPayDialog(
-            item = item,
-            onDismiss = { customPayItem = null },
-            onConfirm = { amount ->
-                onPayCustomAmount(item, amount)
-                customPayItem = null
+    // FINAL CONFIRMATION DIALOG (Requirement 5)
+    if (showBatchConfirmDialog) {
+        val selectedItemsList = items.filter { selectedPayments.containsKey(it.commitmentId) }
+            .map { it to (selectedPayments[it.commitmentId] ?: it.defaultAmount) }
+
+        AlertDialog(
+            onDismissRequest = { showBatchConfirmDialog = false },
+            title = {
+                Text(
+                    text = "Confirm Monthly Payments",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Review and confirm the payments to record for $formattedMonth:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    selectedItemsList.forEach { (item, amt) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "• ${item.name}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Text(
+                                text = DateUtils.formatCurrency(amt),
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = SuccessGreen
+                                )
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Total to Record:",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = DateUtils.formatCurrency(selectedSum),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "Note: Instalments for HP1 and HP2 include interest and contributions. Outstanding loan balances update via statement calibrations in Settings.",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onConfirmBatchPayments(selectedItemsList)
+                        selectedPayments.clear()
+                        showBatchConfirmDialog = false
+                    },
+                    modifier = Modifier.testTag("dialog_confirm_payments_btn")
+                ) {
+                    Text("Record Payments")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatchConfirmDialog = false }) {
+                    Text("Cancel (Do not record)")
+                }
             }
         )
     }
@@ -280,21 +672,26 @@ fun CommitmentsScreen(
 }
 
 @Composable
-fun CommitmentRowItem(
+fun PokaYokeCommitmentRowItem(
     item: MonthlyCommitmentItem,
-    onToggle: () -> Unit,
-    onCustomPayClick: () -> Unit,
+    isSelectedInBatch: Boolean,
+    batchAmount: Double,
+    onToggleSelection: () -> Unit,
+    onAmountChange: (Double) -> Unit,
     onUpdateDefaultClick: () -> Unit
 ) {
+    var isEditingAmount by remember { mutableStateOf(false) }
+    var editAmountText by remember(batchAmount) { mutableStateOf(batchAmount.toString()) }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("commitment_item_${item.commitmentId}"),
         colors = CardDefaults.cardColors(
-            containerColor = if (item.isPaid) {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-            } else {
-                MaterialTheme.colorScheme.surface
+            containerColor = when {
+                item.isPaid -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                isSelectedInBatch -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                else -> MaterialTheme.colorScheme.surface
             }
         ),
         shape = RoundedCornerShape(16.dp),
@@ -309,12 +706,12 @@ fun CommitmentRowItem(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // One tap checkbox
+                // Checkbox: when not paid, selects for batch confirmation
                 Checkbox(
-                    checked = item.isPaid,
-                    onCheckedChange = { onToggle() },
+                    checked = item.isPaid || isSelectedInBatch,
+                    onCheckedChange = { onToggleSelection() },
                     colors = CheckboxDefaults.colors(
-                        checkedColor = SuccessGreen,
+                        checkedColor = if (item.isPaid) SuccessGreen else MaterialTheme.colorScheme.primary,
                         checkmarkColor = MaterialTheme.colorScheme.surface
                     ),
                     modifier = Modifier.testTag("commitment_checkbox_${item.commitmentId}")
@@ -352,14 +749,18 @@ fun CommitmentRowItem(
 
                     if (item.isPaid) {
                         Text(
-                            text = if (item.actualPaidAmount != item.defaultAmount) {
-                                "Paid: ${DateUtils.formatCurrency(item.actualPaidAmount)} (Default was ${DateUtils.formatCurrency(item.defaultAmount)})"
-                            } else {
-                                "Paid: ${DateUtils.formatCurrency(item.actualPaidAmount)}"
-                            },
+                            text = "Recorded Paid: ${DateUtils.formatCurrency(item.actualPaidAmount)} (Tap checkbox to unmark)",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = SuccessGreen,
                                 fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                    } else if (isSelectedInBatch) {
+                        Text(
+                            text = "Ready to confirm: ${DateUtils.formatCurrency(batchAmount)}",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
                             )
                         )
                     } else {
@@ -373,7 +774,7 @@ fun CommitmentRowItem(
                 }
 
                 Text(
-                    text = if (item.isPaid) DateUtils.formatCurrency(item.actualPaidAmount) else DateUtils.formatCurrency(item.defaultAmount),
+                    text = if (item.isPaid) DateUtils.formatCurrency(item.actualPaidAmount) else DateUtils.formatCurrency(batchAmount),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = if (item.isPaid) SuccessGreen else MaterialTheme.colorScheme.onSurface
@@ -381,53 +782,80 @@ fun CommitmentRowItem(
                 )
             }
 
-            // Action row: Custom payment & Edit default
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 48.dp, top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.clickable(onClick = onCustomPayClick)
+            // Options: Edit payment amount & Edit recurring default
+            if (!item.isPaid) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 48.dp, top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (item.isPaid) "Edit Paid Amount" else "Pay Different Amount",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        ),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.clickable(onClick = onUpdateDefaultClick)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tune,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    if (isEditingAmount) {
+                        OutlinedTextField(
+                            value = editAmountText,
+                            onValueChange = {
+                                editAmountText = it
+                                val parsed = it.toDoubleOrNull()
+                                if (parsed != null && parsed >= 0.0) {
+                                    onAmountChange(parsed)
+                                }
+                            },
+                            label = { Text("Amount") },
+                            prefix = { Text("RM ") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.width(130.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Change Default",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        TextButton(onClick = { isEditingAmount = false }) {
+                            Text("Done")
+                        }
+                    } else {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable {
+                                isEditingAmount = true
+                                // Also select it for batch
+                                if (!isSelectedInBatch) onToggleSelection()
+                            }
+                        ) {
+                            Text(
+                                text = "Adjust Amount",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
-                        )
+                        }
+
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable(onClick = onUpdateDefaultClick)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Change Default",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -436,91 +864,12 @@ fun CommitmentRowItem(
 }
 
 @Composable
-fun CustomPayDialog(
-    item: MonthlyCommitmentItem,
-    onDismiss: () -> Unit,
-    onConfirm: (Double) -> Unit
-) {
-    var amountText by remember { mutableStateOf(if (item.isPaid) item.actualPaidAmount.toString() else item.defaultAmount.toString()) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Pay Different Amount",
-                fontWeight = FontWeight.Bold
-            )
-        },
-        text = {
-            Column {
-                Text(
-                    text = "Record an actual payment for '${item.name}' that differs from the default (${DateUtils.formatCurrency(item.defaultAmount)}).",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Note: This is temporary for this month and will NOT overwrite your recurring default.",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = {
-                        if (it.isEmpty() || it.matches(Regex("""^\d*(\.\d{0,2})?$"""))) {
-                            amountText = it
-                            error = null
-                        }
-                    },
-                    label = { Text("Actual Paid Amount (MYR)") },
-                    prefix = { Text("RM ") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("custom_pay_input")
-                )
-                if (error != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = error ?: "", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val amount = amountText.toDoubleOrNull()
-                    if (amount == null || amount < 0.0) {
-                        error = "Enter a valid amount"
-                    } else {
-                        onConfirm(amount)
-                    }
-                },
-                modifier = Modifier.testTag("confirm_custom_pay_btn")
-            ) {
-                Text("Confirm Payment")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
 fun UpdateDefaultDialog(
     item: MonthlyCommitmentItem,
     onDismiss: () -> Unit,
     onConfirm: (Double) -> Unit
 ) {
-    var defaultText by remember { mutableStateOf(item.defaultAmount.toString()) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var newAmountText by remember { mutableStateOf(item.defaultAmount.toString()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -533,53 +882,31 @@ fun UpdateDefaultDialog(
         text = {
             Column {
                 Text(
-                    text = "Permanently update the monthly recurring default for '${item.name}'.",
-                    style = MaterialTheme.typography.bodyMedium
+                    text = "Update the standard monthly commitment amount for ${item.name}:",
+                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
                 )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Current default: ${DateUtils.formatCurrency(item.defaultAmount)}",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-
+                Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
-                    value = defaultText,
-                    onValueChange = {
-                        if (it.isEmpty() || it.matches(Regex("""^\d*(\.\d{0,2})?$"""))) {
-                            defaultText = it
-                            error = null
-                        }
-                    },
-                    label = { Text("New Monthly Default (MYR)") },
+                    value = newAmountText,
+                    onValueChange = { newAmountText = it },
+                    label = { Text("Default Monthly Amount") },
                     prefix = { Text("RM ") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("new_default_input")
+                    modifier = Modifier.fillMaxWidth()
                 )
-                if (error != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = error ?: "", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val amount = defaultText.toDoubleOrNull()
-                    if (amount == null || amount <= 0.0) {
-                        error = "Enter a valid default amount"
-                    } else {
-                        onConfirm(amount)
+                    val parsed = newAmountText.toDoubleOrNull()
+                    if (parsed != null && parsed >= 0.0) {
+                        onConfirm(parsed)
                     }
-                },
-                modifier = Modifier.testTag("confirm_update_default_btn")
+                }
             ) {
-                Text("Update Default")
+                Text("Save")
             }
         },
         dismissButton = {

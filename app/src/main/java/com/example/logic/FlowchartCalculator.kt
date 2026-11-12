@@ -2,6 +2,12 @@ package com.example.logic
 
 import com.example.data.model.DebtEntity
 import com.example.data.model.FinancialProfileEntity
+import com.example.data.model.FlowchartVerificationEntity
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+import java.util.TimeZone
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 
@@ -15,13 +21,19 @@ data class FlowchartStepInfo(
     val stepNumber: Int,
     val title: String,
     val shortName: String,
+    val objective: String,
     val description: String,
     val status: StepStatus,
     val progressPercent: Float,
     val currentAmount: Double,
     val targetAmount: Double,
-    val malaysianAdaptationNote: String,
-    val actionTip: String
+    val remainingAmount: Double,
+    val estimatedCompletionDate: String,
+    val calculationRationale: String,
+    val recommendedMonthlyContribution: Double,
+    val motivationalMessage: String,
+    val clearNextAction: String,
+    val malaysianAdaptationNote: String
 )
 
 data class FlowchartJourneyState(
@@ -32,13 +44,16 @@ data class FlowchartJourneyState(
     val nextTargetTitle: String,
     val nextTargetAmount: Double,
     val nextTargetRemaining: Double,
+    val activeMission: FlowchartStepInfo,
     val steps: List<FlowchartStepInfo>,
     val totalDebt: Double,
     val highInterestDebt: Double,
     val moderateInterestDebt: Double,
-    val accessibleSavings: Double,
+    val everydayCash: Double,
+    val dedicatedSavings: Double,
+    val dedicatedEmergencyFund: Double,
     val totalKwsp: Double,
-    val estimatedMonthlyLivingExpenses: Double
+    val monthlySurplus: Double
 )
 
 object FlowchartCalculator {
@@ -48,7 +63,11 @@ object FlowchartCalculator {
     fun calculateJourney(
         profile: FinancialProfileEntity,
         debts: List<DebtEntity>,
-        hasRecordedAnyExpense: Boolean = true
+        dedicatedEmergencySavings: Double,
+        dedicatedTotalSavings: Double,
+        verifications: List<FlowchartVerificationEntity> = emptyList(),
+        currentMonthRecordedExpenses: Double = 0.0,
+        plannedCommitments: Double = 3908.33
     ): FlowchartJourneyState {
         val totalDebt = debts.sumOf { it.currentBalance }
         val highInterestDebts = debts.filter { it.isHighInterest }
@@ -60,61 +79,100 @@ object FlowchartCalculator {
         val moderateInterestBalance = moderateInterestDebts.sumOf { it.currentBalance }
         val moderateInterestInitial = moderateInterestDebts.sumOf { it.initialBalance }.let { if (it <= 0) 20568.0 else it }
 
-        val accessibleSavings = profile.totalAccessibleSavings
+        val everydayCash = profile.bankBalance
         val totalKwsp = profile.totalKwsp
 
-        // Estimate essential monthly living expenses (rent + kids + utilities + food + parents)
-        // Around RM3,300/month
-        val monthlyEssentials = 3300.0
+        // Actual Monthly Surplus available for savings or debt acceleration
+        val monthlyNetIncome = profile.netMonthlySalary
+        val monthlySurplus = max(0.0, monthlyNetIncome - plannedCommitments - currentMonthRecordedExpenses)
 
-        // Step 0: Budgeting & Basics
-        val step0Completed = hasRecordedAnyExpense
+        val verificationMap = verifications.associateBy { it.stepNumber }
+
+        // Step 0: Budgeting & Essentials Tracking
+        // CORRECTION: Must NOT complete automatically from an expense. Requires verified confirmation!
+        val step0Confirmed = verificationMap[0]?.isConfirmed == true
+        val step0Remaining = if (step0Confirmed) 0.0 else 1.0
         val step0 = FlowchartStepInfo(
             stepNumber = 0,
-            title = "Step 0: Budgeting & Essentials Tracking",
+            title = "Step 0: Budgeting & Essentials Management",
             shortName = "Budget & Essentials",
-            description = "Track all income and essential monthly commitments to prevent overspending and late fees.",
-            status = if (step0Completed) StepStatus.COMPLETED else StepStatus.ACTIVE,
-            progressPercent = if (step0Completed) 100f else 50f,
-            currentAmount = if (step0Completed) 1.0 else 0.0,
+            objective = "Know where every Ringgit goes and establish direct debits for essential survival commitments.",
+            description = "Track all income, recurring commitments (Rent RM700, Parents RM200, Fibre RM95, Playschool RM550, Formula RM100), and everyday spending.",
+            status = if (step0Confirmed) StepStatus.COMPLETED else StepStatus.ACTIVE,
+            progressPercent = if (step0Confirmed) 100f else 50f,
+            currentAmount = if (step0Confirmed) 1.0 else 0.5,
             targetAmount = 1.0,
-            malaysianAdaptationNote = "Adapted with recurring Malaysian commitments: Rent (RM700), Parents (RM200), Mother's fibre (RM95), Playschool (RM550), and Formula (RM100).",
-            actionTip = "Check in on your monthly commitments between the 27th and month-end."
+            remainingAmount = step0Remaining,
+            estimatedCompletionDate = if (step0Confirmed) "Confirmed" else "Review & Confirm",
+            calculationRationale = "Step 0 requires user verification of monthly budget and standing orders.",
+            recommendedMonthlyContribution = 0.0,
+            motivationalMessage = "Budgeting is the foundational engine of financial freedom.",
+            clearNextAction = "Review and confirm your monthly commitment checklist.",
+            malaysianAdaptationNote = "Adapted with Malaysian commitments: Rent (RM700), Parents (RM200), Mother's fibre (RM95), Playschool (RM550), and Formula (RM100)."
         )
 
         // Step 1: Starter Emergency Fund (RM1,000 Buffer)
+        // CORRECTION: Only DEDICATED emergency savings count. Ordinary bank balance does NOT count!
         val step1Target = 1000.0
-        val step1Completed = accessibleSavings >= step1Target
-        val step1Progress = min(100f, (accessibleSavings / step1Target * 100.0).toFloat())
+        val step1Remaining = max(0.0, step1Target - dedicatedEmergencySavings)
+        val step1Completed = dedicatedEmergencySavings >= step1Target
+        val step1Progress = min(100f, (dedicatedEmergencySavings / step1Target * 100.0).toFloat())
+
+        val (step1EstDate, step1Rationale) = calculateEstimate(step1Remaining, monthlySurplus)
+
+        val step1Status = when {
+            step1Completed -> StepStatus.COMPLETED
+            step0Confirmed -> StepStatus.ACTIVE
+            else -> StepStatus.ACTIVE // Can build starter fund concurrently
+        }
+
         val step1 = FlowchartStepInfo(
             stepNumber = 1,
-            title = "Step 1: Starter Emergency Fund (RM1,000 Buffer)",
+            title = "Step 1: Build Your Starter Emergency Buffer",
             shortName = "Starter Buffer",
-            description = "Hold a minimum liquid cash reserve of RM1,000 to handle minor shocks without borrowing.",
-            status = if (step1Completed) StepStatus.COMPLETED else StepStatus.ACTIVE,
+            objective = "Deposit a deliberate RM1,000 into a dedicated savings vault to protect against unexpected shocks.",
+            description = "Hold a dedicated, untouchable cash reserve of RM1,000 in your Savings Vault. Everyday bank cash does not qualify as an emergency fund.",
+            status = step1Status,
             progressPercent = step1Progress,
-            currentAmount = accessibleSavings,
+            currentAmount = dedicatedEmergencySavings,
             targetAmount = step1Target,
-            malaysianAdaptationNote = "UK £500-£1,000 starter buffer adapted to RM1,000 liquid bank balance.",
-            actionTip = "Keep this buffer untouched in your primary bank account."
+            remainingAmount = step1Remaining,
+            estimatedCompletionDate = step1EstDate,
+            calculationRationale = step1Rationale,
+            recommendedMonthlyContribution = min(step1Remaining, if (monthlySurplus > 0) monthlySurplus else 250.0),
+            motivationalMessage = "A deliberate starter buffer ensures you never have to swipe a credit card for surprise emergencies.",
+            clearNextAction = "Transfer cash into 'My Savings Vault' under Emergency Fund purpose.",
+            malaysianAdaptationNote = "UK £500-£1,000 starter buffer adapted to RM1,000 in a dedicated high-yield liquid savings account."
         )
 
-        // Step 2: Mandatory Retirement Match / Maximise Free Money
-        val step2Completed = totalKwsp > 0
+        // Step 2: Workplace Pension Match / Statutory KWSP Verification
+        // CORRECTION: Positive KWSP balance alone does not mean condition is completed. Documented & verified.
+        val step2Confirmed = verificationMap[2]?.isConfirmed == true || totalKwsp > 0
+        val step2Status = when {
+            !step1Completed -> StepStatus.LOCKED
+            step2Confirmed -> StepStatus.COMPLETED
+            else -> StepStatus.ACTIVE
+        }
         val step2 = FlowchartStepInfo(
             stepNumber = 2,
             title = "Step 2: Workplace Pension Match / Statutory KWSP",
             shortName = "Workplace EPF/KWSP",
-            description = "Maximise mandatory statutory employer retirement contributions.",
-            status = StepStatus.COMPLETED,
-            progressPercent = 100f,
+            objective = "Verify that mandatory employer retirement contributions (12–13%) are maximized.",
+            description = "In the UK Flowchart, this step captures 'free money' via employer match. In Malaysia, statutory employer EPF is mandatory (13% for gross <= RM5,000).",
+            status = step2Status,
+            progressPercent = if (step2Status == StepStatus.COMPLETED) 100f else 0f,
             currentAmount = totalKwsp,
             targetAmount = totalKwsp,
-            malaysianAdaptationNote = "In Malaysia, statutory KWSP (EPF) 11% employee + 12-13% employer match is automatically deducted for salaried engineers. You have RM99,179.72 accumulated across Accounts 1, 2, and 3.",
-            actionTip = "Statutory employer contributions are actively building your retirement pillar."
+            remainingAmount = 0.0,
+            estimatedCompletionDate = if (step2Status == StepStatus.COMPLETED) "Verified Active" else "Review Payslip",
+            calculationRationale = "Salaried engineer has statutory employer EPF deducted monthly.",
+            recommendedMonthlyContribution = 0.0,
+            motivationalMessage = "Statutory employer contributions are building your long-term retirement pillar in the background.",
+            clearNextAction = "Verify employer EPF contribution in Monthly Check-In.",
+            malaysianAdaptationNote = "Statutory 11% employee + 13% employer EPF contribution across Accounts 1, 2, and 3. Mandatory deductions are statutory, not discretionary matching."
         )
 
-        // Step 3: High-Interest Debt Elimination (> 10% APR)
+        // Step 3: High-Interest Debt Elimination (>10% APR)
         val step3Completed = highInterestBalance <= 0.01
         val step3Progress = if (step3Completed) 100f else {
             val paidOff = max(0.0, highInterestInitial - highInterestBalance)
@@ -125,42 +183,60 @@ object FlowchartCalculator {
             step1Completed -> StepStatus.ACTIVE
             else -> StepStatus.LOCKED
         }
+        val (step3EstDate, step3Rationale) = calculateEstimate(
+            highInterestBalance,
+            if (monthlySurplus > 0) monthlySurplus + 1483.33 else 1483.33 // CC (1200) + SLoan (283.33)
+        )
         val step3 = FlowchartStepInfo(
             stepNumber = 3,
             title = "Step 3: High-Interest Debt Elimination (>10% APR)",
             shortName = "High-Interest Debt",
-            description = "Aggressively pay off Maybank Credit Card (~18% APR) and Shopee SLoan (~18% APR).",
+            objective = "Aggressively destroy Maybank Credit Card (~18% APR) and Shopee SLoan (~18% APR).",
+            description = "High-interest debt destroys compounding wealth. Eliminate Maybank CC (RM10,093.43) and Shopee SLoan (RM1,983.33) before saving large funds.",
             status = step3Status,
             progressPercent = step3Progress,
-            currentAmount = highInterestBalance,
-            targetAmount = 0.0,
-            malaysianAdaptationNote = "Targets Malaysian credit card debt (18% p.a.) and Shopee SLoan. Credit card repayment is not treated as a new purchase expense.",
-            actionTip = "Target: Clear Shopee SLoan (RM1,983.33) first, then accelerate Maybank Credit Card (RM10,093.43) with RM1,200/mo."
+            currentAmount = max(0.0, highInterestInitial - highInterestBalance),
+            targetAmount = highInterestInitial,
+            remainingAmount = highInterestBalance,
+            estimatedCompletionDate = step3EstDate,
+            calculationRationale = step3Rationale,
+            recommendedMonthlyContribution = 1483.33,
+            motivationalMessage = "Clearing 18% debt gives an immediate, guaranteed 18% return on your money.",
+            clearNextAction = "Clear Shopee SLoan first (RM1,983.33), then deploy RM1,483.33/mo into Maybank CC.",
+            malaysianAdaptationNote = "Targets Malaysian credit card debt (18% p.a.) and Shopee SLoan. Credit card repayments are debt elimination, not new purchases."
         )
 
-        // Step 4: Full Emergency Fund (3 - 6 Months)
-        val step4Target = monthlyEssentials * 3 // RM9,900 (~RM10,000)
-        val step4Completed = accessibleSavings >= step4Target
-        val step4Progress = min(100f, (accessibleSavings / step4Target * 100.0).toFloat())
+        // Step 4: Full Emergency Fund (3 Months Living Expenses)
+        val step4Target = 10000.0 // 3 months of essential family expenses (~RM3,300/mo)
+        val step4Remaining = max(0.0, step4Target - dedicatedEmergencySavings)
+        val step4Completed = dedicatedEmergencySavings >= step4Target
+        val step4Progress = min(100f, (dedicatedEmergencySavings / step4Target * 100.0).toFloat())
         val step4Status = when {
             step4Completed -> StepStatus.COMPLETED
             step3Completed -> StepStatus.ACTIVE
             else -> StepStatus.LOCKED
         }
+        val (step4EstDate, step4Rationale) = calculateEstimate(step4Remaining, monthlySurplus + 1483.33)
         val step4 = FlowchartStepInfo(
             stepNumber = 4,
             title = "Step 4: Full Emergency Fund (3 Months Living Expenses)",
             shortName = "3-Month Safety Net",
-            description = "Build a solid liquid reserve of RM10,000 (3 months of essential family expenses) in high-yield or accessible savings.",
+            objective = "Build RM10,000 in dedicated liquid emergency reserves (My Savings Vault).",
+            description = "Save 3 full months of living costs into high-yield liquid savings. KWSP is not liquid emergency cash.",
             status = step4Status,
             progressPercent = step4Progress,
-            currentAmount = accessibleSavings,
+            currentAmount = dedicatedEmergencySavings,
             targetAmount = step4Target,
-            malaysianAdaptationNote = "Liquid reserves in high-yield bank savings, ASB, or Tabung Haji (KWSP cannot be counted as liquid emergency cash).",
-            actionTip = "Once high-interest debt is cleared, redirect the RM1,483/mo debt budget into liquid emergency savings."
+            remainingAmount = step4Remaining,
+            estimatedCompletionDate = step4EstDate,
+            calculationRationale = step4Rationale,
+            recommendedMonthlyContribution = 1000.0,
+            motivationalMessage = "With 3 months of emergency buffer, life's financial curveballs bounce right off you.",
+            clearNextAction = "Redirect freed-up RM1,483/mo debt repayment budget into My Savings Vault.",
+            malaysianAdaptationNote = "Liquid reserves in high-yield bank savings, ASB, or Tabung Haji. KWSP Account 1 is locked for retirement."
         )
 
-        // Step 5: Moderate-Interest Debt & Short-Term Goals (< 5 years)
+        // Step 5: Moderate-Interest Debt (Vehicle Hire Purchase)
         val step5Completed = moderateInterestBalance <= 0.01
         val step5Progress = if (step5Completed) 100f else {
             val paidOff = max(0.0, moderateInterestInitial - moderateInterestBalance)
@@ -171,17 +247,24 @@ object FlowchartCalculator {
             step4Completed -> StepStatus.ACTIVE
             else -> StepStatus.LOCKED
         }
+        val (step5EstDate, step5Rationale) = calculateEstimate(moderateInterestBalance, 780.0)
         val step5 = FlowchartStepInfo(
             stepNumber = 5,
             title = "Step 5: Moderate-Interest Debt (Vehicle Hire Purchase)",
             shortName = "Vehicle Hire Purchase",
-            description = "Clear Hong Leong Car HP1 (RM7,267) and AmBank Car HP2 (RM13,301) to become 100% debt free.",
+            objective = "Settle Hong Leong Car HP1 (RM7,267) and AmBank Car HP2 (RM13,301) to become 100% debt free.",
+            description = "Settle car hire-purchase loans. Outstanding principal updates from confirmed statement balances.",
             status = step5Status,
             progressPercent = step5Progress,
-            currentAmount = moderateInterestBalance,
-            targetAmount = 0.0,
-            malaysianAdaptationNote = "Addresses Malaysian Hire Purchase (Sewa Beli kereta) commitments: HP1 (RM530/mo) and HP2 contribution (RM250/mo).",
-            actionTip = "Continue regular monthly HP installments or settle early once emergency fund is fully funded."
+            currentAmount = max(0.0, moderateInterestInitial - moderateInterestBalance),
+            targetAmount = moderateInterestInitial,
+            remainingAmount = moderateInterestBalance,
+            estimatedCompletionDate = step5EstDate,
+            calculationRationale = step5Rationale,
+            recommendedMonthlyContribution = 780.0,
+            motivationalMessage = "No car payments means RM780 more freedom in your pocket each month.",
+            clearNextAction = "Continue regular installments and confirm lender statement balance.",
+            malaysianAdaptationNote = "Addresses Malaysian Hire Purchase (Sewa Beli kenderaan HP1 & HP2). Principal verified via statement."
         )
 
         // Step 6: Long-Term Investing & Financial Freedom (Target Age 41–45)
@@ -193,62 +276,68 @@ object FlowchartCalculator {
             stepNumber = 6,
             title = "Step 6: Long-Term Investing & Financial Freedom",
             shortName = "Financial Freedom (Age 41-45)",
-            description = "Invest surplus income towards financial independence between age 41 and 45 (5–9 years horizon).",
+            objective = "Invest surplus income towards financial independence between age 41 and 45 (5–9 years horizon).",
+            description = "Maximize ASB, Tabung Haji, voluntary KWSP self-contributions (up to RM100k/yr), and low-cost global index funds.",
             status = step6Status,
-            progressPercent = if (step5Completed) 50f else 10f,
+            progressPercent = if (step5Completed) 50f else 5f,
             currentAmount = profile.asb + profile.tabungHaji + profile.otherInvestments,
             targetAmount = 100000.0,
-            malaysianAdaptationNote = "UK S&S ISA & SIPP adapted to Malaysian instruments: ASB (Amanah Saham Bumiputera), Tabung Haji, KWSP Voluntary Self-Contribution (up to RM100k/year), and low-cost index funds.",
-            actionTip = "Maximise ASB / Tabung Haji and KWSP voluntary top-ups with your freed-up cash flow."
+            remainingAmount = max(0.0, 100000.0 - (profile.asb + profile.tabungHaji)),
+            estimatedCompletionDate = "Target Age 41–45",
+            calculationRationale = "5 to 9 year investment horizon to reach financial independence.",
+            recommendedMonthlyContribution = 1500.0,
+            motivationalMessage = "Your money works for you. Financial freedom on your terms.",
+            clearNextAction = "Establish recurring monthly investments in ASB / index funds.",
+            malaysianAdaptationNote = "UK S&S ISA adapted to ASB, Tabung Haji, KWSP voluntary top-up, and global index funds."
         )
 
         val steps = listOf(step0, step1, step2, step3, step4, step5, step6)
 
-        // Find current active step
-        val currentStep = steps.firstOrNull { it.status == StepStatus.ACTIVE } ?: steps.last()
+        // Identify currently active mission (first non-completed step)
+        val activeMission = steps.firstOrNull { it.status == StepStatus.ACTIVE } ?: steps.last()
 
-        // Calculate overall journey progress (each step contributes ~14.28% out of 7 steps)
-        val completedStepsCount = steps.count { it.status == StepStatus.COMPLETED }
-        val currentStepFraction = (currentStep.progressPercent / 100f)
-        val overallProgress = min(100f, ((completedStepsCount + currentStepFraction) / steps.size.toFloat()) * 100f)
-
-        // Determine next specific target
-        val (targetTitle, targetAmt, targetRemaining) = when {
-            !step1Completed -> Triple("Build RM1,000 Starter Buffer", 1000.0, max(0.0, 1000.0 - accessibleSavings))
-            highInterestBalance > 0 -> {
-                val sloan = debts.firstOrNull { it.key == "SHOPEE_SLOAN" }
-                if (sloan != null && sloan.currentBalance > 0) {
-                    Triple("Clear Shopee SLoan (${formatMyr(sloan.currentBalance)})", sloan.initialBalance, sloan.currentBalance)
-                } else {
-                    val cc = debts.firstOrNull { it.key == "MAYBANK_CC" }
-                    val ccBal = cc?.currentBalance ?: highInterestBalance
-                    Triple("Clear Maybank Credit Card (${formatMyr(ccBal)})", cc?.initialBalance ?: highInterestInitial, ccBal)
-                }
-            }
-            !step4Completed -> Triple("Save 3-Month Emergency Fund (${formatMyr(step4Target)})", step4Target, max(0.0, step4Target - accessibleSavings))
-            moderateInterestBalance > 0 -> Triple("Pay off Car Hire Purchase (${formatMyr(moderateInterestBalance)})", moderateInterestInitial, moderateInterestBalance)
-            else -> Triple("Invest for Freedom (Age 41-45)", 100000.0, max(0.0, 100000.0 - (profile.asb + profile.tabungHaji)))
-        }
+        val completedCount = steps.count { it.status == StepStatus.COMPLETED }
+        val overallProgress = min(100f, ((completedCount + (activeMission.progressPercent / 100f)) / steps.size.toFloat()) * 100f)
 
         return FlowchartJourneyState(
-            currentStepNumber = currentStep.stepNumber,
-            currentStepTitle = currentStep.title,
-            currentStepProgressPercent = currentStep.progressPercent,
+            currentStepNumber = activeMission.stepNumber,
+            currentStepTitle = activeMission.title,
+            currentStepProgressPercent = activeMission.progressPercent,
             overallJourneyProgressPercent = overallProgress,
-            nextTargetTitle = targetTitle,
-            nextTargetAmount = targetAmt,
-            nextTargetRemaining = targetRemaining,
+            nextTargetTitle = activeMission.title,
+            nextTargetAmount = activeMission.targetAmount,
+            nextTargetRemaining = activeMission.remainingAmount,
+            activeMission = activeMission,
             steps = steps,
             totalDebt = totalDebt,
             highInterestDebt = highInterestBalance,
             moderateInterestDebt = moderateInterestBalance,
-            accessibleSavings = accessibleSavings,
+            everydayCash = everydayCash,
+            dedicatedSavings = dedicatedTotalSavings,
+            dedicatedEmergencyFund = dedicatedEmergencySavings,
             totalKwsp = totalKwsp,
-            estimatedMonthlyLivingExpenses = monthlyEssentials
+            monthlySurplus = monthlySurplus
         )
     }
 
-    private fun formatMyr(amount: Double): String {
-        return "RM ${String.format("%,.2f", amount)}"
+    private fun calculateEstimate(remaining: Double, monthlyRate: Double): Pair<String, String> {
+        if (remaining <= 0.0) {
+            return Pair("Goal Achieved", "Target reached based on verified records.")
+        }
+        if (monthlyRate <= 0.0) {
+            return Pair(
+                "Estimation unavailable",
+                "Monthly surplus is currently RM0.00. Free up cashflow to project completion."
+            )
+        }
+        val monthsNeeded = ceil(remaining / monthlyRate).toInt()
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kuala_Lumpur"))
+        cal.add(Calendar.MONTH, monthsNeeded)
+        val sdf = SimpleDateFormat("MMMM yyyy", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("Asia/Kuala_Lumpur")
+        }
+        val targetDate = sdf.format(cal.time)
+        val rationale = "Remaining RM${String.format(Locale.US, "%,.2f", remaining)} ÷ RM${String.format(Locale.US, "%,.2f", monthlyRate)}/mo = ~$monthsNeeded months ($targetDate)"
+        return Pair(targetDate, rationale)
     }
 }

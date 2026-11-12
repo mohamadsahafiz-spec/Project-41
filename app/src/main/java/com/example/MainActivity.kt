@@ -8,18 +8,19 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Insights
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -27,7 +28,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -56,17 +56,19 @@ import com.example.ui.screens.ExpensesScreen
 import com.example.ui.screens.FinancialJourneyScreen
 import com.example.ui.screens.MonthlyReviewScreen
 import com.example.ui.screens.ProfileSettingsScreen
+import com.example.ui.screens.SavingsVaultScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.widget.ExpenseWidgetProvider
 
 enum class ScreenTab(val title: String) {
-    DASHBOARD("Freedom Tracker"),
-    COMMITMENTS("Monthly Commitments"),
+    DASHBOARD("Project 41"),
+    COMMITMENTS("Monthly Check-In"),
+    VAULT("My Savings Vault"),
+    JOURNEY("Flowchart Mission"),
     EXPENSES("Quick Expenses"),
-    JOURNEY("Financial Journey"),
     REVIEW("Monthly Review"),
     ACHIEVEMENTS("Milestones"),
-    PROFILE("Profile & Backup")
+    PROFILE("Profile & Settings")
 }
 
 class MainActivity : ComponentActivity() {
@@ -92,7 +94,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleWidgetIntent(intent: Intent?) {
-        if (intent?.action == ExpenseWidgetProvider.ACTION_ADD_EXPENSE) {
+        if (intent?.action == ExpenseWidgetProvider.ACTION_ADD_EXPENSE ||
+            intent?.getBooleanExtra("OPEN_EXPENSE_DIALOG", false) == true
+        ) {
             viewModel.openQuickExpenseDialog()
         }
     }
@@ -116,6 +120,13 @@ fun MainAppScreen(viewModel: MainViewModel) {
     val monthlySummary by viewModel.monthlySummary.collectAsStateWithLifecycle()
     val showQuickExpenseDialog by viewModel.showQuickExpenseDialog.collectAsStateWithLifecycle()
 
+    // Savings Vault states
+    val savingsAccounts by viewModel.savingsAccounts.collectAsStateWithLifecycle()
+    val totalDedicatedSavings by viewModel.totalDedicatedSavings.collectAsStateWithLifecycle()
+    val totalEmergencyFund by viewModel.totalEmergencyFund.collectAsStateWithLifecycle()
+    val totalInterestCredited by viewModel.totalInterestCredited.collectAsStateWithLifecycle()
+    val currentMonthIncome by viewModel.currentMonthIncome.collectAsStateWithLifecycle()
+
     val totalSpendingThisMonth = remember(currentMonthExpenses) {
         currentMonthExpenses.sumOf { it.amount }
     }
@@ -138,15 +149,36 @@ fun MainAppScreen(viewModel: MainViewModel) {
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = currentTab.title,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
+                    Column {
+                        Text(
+                            text = currentTab.title,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
                         )
-                    )
+                        if (currentTab == ScreenTab.DASHBOARD) {
+                            Text(
+                                text = "Your Journey. Your Rules.",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            )
+                        }
+                    }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { currentTab = ScreenTab.EXPENSES },
+                        modifier = Modifier.testTag("nav_to_expenses_icon")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ReceiptLong,
+                            contentDescription = "Expenses",
+                            tint = if (currentTab == ScreenTab.EXPENSES) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     IconButton(
                         onClick = { currentTab = ScreenTab.ACHIEVEMENTS },
                         modifier = Modifier.testTag("nav_to_achievements_icon")
@@ -182,35 +214,35 @@ fun MainAppScreen(viewModel: MainViewModel) {
                     selected = currentTab == ScreenTab.DASHBOARD,
                     onClick = { currentTab = ScreenTab.DASHBOARD },
                     icon = { Icon(Icons.Default.Dashboard, contentDescription = "Home") },
-                    label = { Text("Home", fontSize = 11.sp) },
+                    label = { Text("Home", fontSize = 10.sp) },
                     modifier = Modifier.testTag("tab_home")
+                )
+                NavigationBarItem(
+                    selected = currentTab == ScreenTab.JOURNEY,
+                    onClick = { currentTab = ScreenTab.JOURNEY },
+                    icon = { Icon(Icons.Default.AccountTree, contentDescription = "Mission") },
+                    label = { Text("Mission", fontSize = 10.sp) },
+                    modifier = Modifier.testTag("tab_journey")
                 )
                 NavigationBarItem(
                     selected = currentTab == ScreenTab.COMMITMENTS,
                     onClick = { currentTab = ScreenTab.COMMITMENTS },
                     icon = { Icon(Icons.Default.CalendarToday, contentDescription = "Check-In") },
-                    label = { Text("Check-In", fontSize = 11.sp) },
+                    label = { Text("Check-In", fontSize = 10.sp) },
                     modifier = Modifier.testTag("tab_commitments")
                 )
                 NavigationBarItem(
-                    selected = currentTab == ScreenTab.EXPENSES,
-                    onClick = { currentTab = ScreenTab.EXPENSES },
-                    icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Expenses") },
-                    label = { Text("Expenses", fontSize = 11.sp) },
-                    modifier = Modifier.testTag("tab_expenses")
-                )
-                NavigationBarItem(
-                    selected = currentTab == ScreenTab.JOURNEY,
-                    onClick = { currentTab = ScreenTab.JOURNEY },
-                    icon = { Icon(Icons.Default.AccountTree, contentDescription = "Flowchart") },
-                    label = { Text("Flowchart", fontSize = 11.sp) },
-                    modifier = Modifier.testTag("tab_journey")
+                    selected = currentTab == ScreenTab.VAULT,
+                    onClick = { currentTab = ScreenTab.VAULT },
+                    icon = { Icon(Icons.Default.Savings, contentDescription = "Vault") },
+                    label = { Text("Vault", fontSize = 10.sp) },
+                    modifier = Modifier.testTag("tab_vault")
                 )
                 NavigationBarItem(
                     selected = currentTab == ScreenTab.REVIEW,
                     onClick = { currentTab = ScreenTab.REVIEW },
                     icon = { Icon(Icons.Default.Insights, contentDescription = "Review") },
-                    label = { Text("Review", fontSize = 11.sp) },
+                    label = { Text("Review", fontSize = 10.sp) },
                     modifier = Modifier.testTag("tab_review")
                 )
             }
@@ -232,18 +264,50 @@ fun MainAppScreen(viewModel: MainViewModel) {
                         latestAchievement = latestAchievement,
                         onAddExpenseClick = { viewModel.openQuickExpenseDialog() },
                         onNavigateToCheckIn = { currentTab = ScreenTab.COMMITMENTS },
+                        onNavigateToVault = { currentTab = ScreenTab.VAULT },
                         onNavigateToReview = { currentTab = ScreenTab.REVIEW },
                         onNavigateToJourney = { currentTab = ScreenTab.JOURNEY },
                         onNavigateToAchievements = { currentTab = ScreenTab.ACHIEVEMENTS }
+                    )
+                }
+                ScreenTab.JOURNEY -> {
+                    FinancialJourneyScreen(
+                        journeyState = journeyState,
+                        onConfirmStepVerification = { stepNum, isConfirmed, notes ->
+                            viewModel.confirmStepVerification(stepNum, isConfirmed, notes)
+                        }
                     )
                 }
                 ScreenTab.COMMITMENTS -> {
                     CommitmentsScreen(
                         monthKey = selectedMonthKey,
                         items = commitmentItems,
-                        onToggleCommitment = { item -> viewModel.toggleCommitment(item) },
-                        onPayCustomAmount = { item, amt -> viewModel.payCustomCommitment(item, amt) },
+                        currentIncome = currentMonthIncome,
+                        onSaveIncome = { income -> viewModel.saveMonthlyIncome(income) },
+                        onConfirmBatchPayments = { payments -> viewModel.confirmBatchPayments(payments) },
+                        onUnmarkCommitment = { item -> viewModel.unmarkCommitment(item) },
                         onUpdateRecurringDefault = { item, def -> viewModel.updateRecurringDefault(item, def) }
+                    )
+                }
+                ScreenTab.VAULT -> {
+                    SavingsVaultScreen(
+                        profile = profile,
+                        accounts = savingsAccounts,
+                        totalEmergencyFund = totalEmergencyFund,
+                        totalDedicatedSavings = totalDedicatedSavings,
+                        totalInterestCredited = totalInterestCredited,
+                        onAddAccount = { name, purpose, isEmergency, initialBal, ret ->
+                            viewModel.addSavingsAccount(name, purpose, isEmergency, initialBal, ret)
+                        },
+                        onDeposit = { accountId, amount, fromEveryday, note ->
+                            viewModel.depositToSavings(accountId, amount, fromEveryday, note)
+                        },
+                        onWithdraw = { accountId, amount, toEveryday, note ->
+                            viewModel.withdrawFromSavings(accountId, amount, toEveryday, note)
+                        },
+                        onCreditInterest = { accountId, amount, note ->
+                            viewModel.creditInterestToSavings(accountId, amount, note)
+                        }
                     )
                 }
                 ScreenTab.EXPENSES -> {
@@ -255,9 +319,6 @@ fun MainAppScreen(viewModel: MainViewModel) {
                         onAddExpenseClick = { viewModel.openQuickExpenseDialog() },
                         onDeleteExpense = { exp -> viewModel.deleteExpense(exp) }
                     )
-                }
-                ScreenTab.JOURNEY -> {
-                    FinancialJourneyScreen(journeyState = journeyState)
                 }
                 ScreenTab.REVIEW -> {
                     MonthlyReviewScreen(

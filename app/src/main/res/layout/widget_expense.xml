@@ -18,9 +18,9 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Monthly Spending"
+            android:text="PROJECT 41"
             android:textColor="#A1A1AA"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:textStyle="bold" />
 
         <TextView
@@ -60,13 +60,16 @@
     <LinearLayout
         android:id="@+id/widget_btn_add"
         android:layout_width="match_parent"
-        android:layout_height="36dp"
+        android:layout_height="38dp"
         android:background="@drawable/widget_button_bg"
+        android:clickable="true"
+        android:focusable="true"
         android:gravity="center"
         android:orientation="horizontal"
         android:paddingHorizontal="12dp">
 
         <TextView
+            android:id="@+id/widget_btn_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="+ Quick Add Expense"

@@ -1,6 +1,6 @@
 {
-  "name": "Freedom Tracker",
-  "description": "Personal Malaysian Financial Freedom Tracker based on the UK Personal Finance Flowchart",
+  "name": "Project 41",
+  "description": "Project 41: Your Journey. Your Rules. Personal Malaysian Financial Freedom Tracker based on the UK Personal Finance Flowchart v3.0.10",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

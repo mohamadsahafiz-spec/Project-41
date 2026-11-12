@@ -41,19 +41,22 @@ data class FinancialProfileEntity(
     @PrimaryKey val id: Int = 1,
     val netMonthlySalary: Double = 4460.50,
     val basicSalary: Double = 4158.00,
-    val bankBalance: Double = 1039.56,
-    val dedicatedSavings: Double = 0.0,
+    val bankBalance: Double = 1039.56, // Category A: EVERYDAY CASH (current/transactional)
+    val dedicatedSavings: Double = 0.0, // Category B: DEDICATED SAVINGS
     val asb: Double = 0.0,
     val tabungHaji: Double = 0.0,
     val fixedDeposits: Double = 0.0,
     val otherInvestments: Double = 0.0,
-    val kwspAccount1: Double = 92783.88,
+    val kwspAccount1: Double = 92783.88, // Category C: RETIREMENT ASSETS
     val kwspAccount2: Double = 6231.14,
     val kwspAccount3: Double = 164.70,
     val lastUpdated: Long = System.currentTimeMillis()
 ) {
     val totalKwsp: Double
         get() = kwspAccount1 + kwspAccount2 + kwspAccount3
+
+    val totalEverydayCash: Double
+        get() = bankBalance
 
     val totalAccessibleSavings: Double
         get() = bankBalance + dedicatedSavings + asb + tabungHaji + fixedDeposits + otherInvestments
@@ -79,4 +82,65 @@ data class AchievementEntity(
     val category: String,
     val isUnlocked: Boolean = false,
     val unlockedTimestamp: Long? = null
+)
+
+/**
+ * MY SAVINGS VAULT - Category B (Dedicated Savings accounts separated from Everyday Cash)
+ */
+@Entity(tableName = "savings_accounts")
+data class SavingsAccountEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String, // e.g. "Maybank SavePlus", "Rize", "Versa Cash", "ASB"
+    val purpose: String, // "Emergency Fund" or "Other Savings Goals"
+    val isEmergencyFund: Boolean = true,
+    val currentBalance: Double = 0.0,
+    val expectedAnnualReturnPercent: Double? = null,
+    val totalInterestCredited: Double = 0.0,
+    val createdTimestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "savings_transactions")
+data class SavingsTransactionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val accountId: Long,
+    val type: String, // "DEPOSIT", "WITHDRAWAL", "INTEREST"
+    val amount: Double,
+    val fromEverydayCash: Boolean = true,
+    val timestamp: Long = System.currentTimeMillis(),
+    val note: String = ""
+)
+
+/**
+ * Monthly Income Check-In with Gross Salary for KWSP calculations and Net Salary for Cashflow
+ */
+@Entity(
+    tableName = "monthly_incomes",
+    indices = [Index(value = ["monthKey"], unique = true)]
+)
+data class MonthlyIncomeEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val monthKey: String, // "yyyy-MM"
+    val grossSalary: Double = 4158.00,
+    val netSalary: Double = 4460.50,
+    val overtime: Double = 0.0,
+    val incentives: Double = 0.0,
+    val thirteenthMonth: Double = 0.0,
+    val otherIncome: Double = 0.0,
+    val actualEmployeeKwsp: Double? = null,
+    val actualEmployerKwsp: Double? = null,
+    val updatedTimestamp: Long = System.currentTimeMillis()
+) {
+    val totalTakeHomeIncome: Double
+        get() = netSalary + overtime + incentives + thirteenthMonth + otherIncome
+}
+
+/**
+ * Flowchart Step Verification: Allows user review and confirmation for Step 0 (Budgeting) and Step 2 (Workplace match)
+ */
+@Entity(tableName = "flowchart_verifications")
+data class FlowchartVerificationEntity(
+    @PrimaryKey val stepNumber: Int,
+    val isConfirmed: Boolean = false,
+    val confirmedTimestamp: Long? = null,
+    val notes: String = ""
 )
