@@ -191,8 +191,8 @@ object FlowchartCalculator {
             stepNumber = 3,
             title = "Step 3: High-Interest Debt Elimination (>10% APR)",
             shortName = "High-Interest Debt",
-            objective = "Aggressively destroy Maybank Credit Card (~18% APR) and Shopee SLoan (~18% APR).",
-            description = "High-interest debt destroys compounding wealth. Eliminate Maybank CC (RM10,093.43) and Shopee SLoan (RM1,983.33) before saving large funds.",
+            objective = "Aggressively destroy Maybank Credit Card (15% p.a.) and Shopee SLoan (1.5% monthly provisional).",
+            description = "High-interest debt destroys compounding wealth. Eliminate Maybank CC (RM10,093.43 @ 15% p.a.) and Shopee SLoan (RM1,983.33 @ 1.5%/mo) before saving large funds.",
             status = step3Status,
             progressPercent = step3Progress,
             currentAmount = max(0.0, highInterestInitial - highInterestBalance),
@@ -201,9 +201,9 @@ object FlowchartCalculator {
             estimatedCompletionDate = step3EstDate,
             calculationRationale = step3Rationale,
             recommendedMonthlyContribution = 1483.33,
-            motivationalMessage = "Clearing 18% debt gives an immediate, guaranteed 18% return on your money.",
+            motivationalMessage = "Clearing 15% and 1.5%/mo debt provides an immediate guaranteed return equal to the interest saved.",
             clearNextAction = "Clear Shopee SLoan first (RM1,983.33), then deploy RM1,483.33/mo into Maybank CC.",
-            malaysianAdaptationNote = "Targets Malaysian credit card debt (18% p.a.) and Shopee SLoan. Credit card repayments are debt elimination, not new purchases."
+            malaysianAdaptationNote = "Targets Malaysian credit card debt (15% p.a.) and Shopee SLoan (1.5% monthly). Credit card repayments are debt elimination, not new purchases."
         )
 
         // Step 4: Full Emergency Fund (3 Months Living Expenses)
@@ -252,8 +252,8 @@ object FlowchartCalculator {
             stepNumber = 5,
             title = "Step 5: Moderate-Interest Debt (Vehicle Hire Purchase)",
             shortName = "Vehicle Hire Purchase",
-            objective = "Settle Hong Leong Car HP1 (RM7,267) and AmBank Car HP2 (RM13,301) to become 100% debt free.",
-            description = "Settle car hire-purchase loans. Outstanding principal updates from confirmed statement balances.",
+            objective = "Settle Hong Leong Car HP1 (RM7,267 @ 3% ref) and AmBank Car HP2 (RM13,301 @ 3% ref) to become 100% debt free.",
+            description = "Settle car hire-purchase loans. 3% rate is reference info only (no interest projection). Outstanding principal updates strictly from confirmed statement balances.",
             status = step5Status,
             progressPercent = step5Progress,
             currentAmount = max(0.0, moderateInterestInitial - moderateInterestBalance),
@@ -263,8 +263,8 @@ object FlowchartCalculator {
             calculationRationale = step5Rationale,
             recommendedMonthlyContribution = 780.0,
             motivationalMessage = "No car payments means RM780 more freedom in your pocket each month.",
-            clearNextAction = "Continue regular installments and confirm lender statement balance.",
-            malaysianAdaptationNote = "Addresses Malaysian Hire Purchase (Sewa Beli kenderaan HP1 & HP2). Principal verified via statement."
+            clearNextAction = "Record monthly instalments (HP1 RM530, HP2 User contribution RM250) and update statement balances in Settings.",
+            malaysianAdaptationNote = "Addresses Malaysian Hire Purchase (HP1 & HP2 at 3% ref rate). Instalments are recorded without automatic principal deductions; loans are marked settled only when confirmed balance is RM0."
         )
 
         // Step 6: Long-Term Investing & Financial Freedom (Target Age 41–45)

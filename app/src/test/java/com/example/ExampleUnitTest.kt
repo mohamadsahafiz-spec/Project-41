@@ -33,7 +33,7 @@ class ExampleUnitTest {
                 initialBalance = 10093.43,
                 currentBalance = 10093.43,
                 monthlyTarget = 1200.0,
-                aprPercent = 18.0,
+                aprPercent = 15.0,
                 isHighInterest = true
             ),
             DebtEntity(
@@ -51,7 +51,7 @@ class ExampleUnitTest {
                 initialBalance = 7267.0,
                 currentBalance = 7267.0,
                 monthlyTarget = 530.0,
-                aprPercent = 6.0,
+                aprPercent = 3.0,
                 isHighInterest = false
             ),
             DebtEntity(
@@ -60,7 +60,7 @@ class ExampleUnitTest {
                 initialBalance = 13301.0,
                 currentBalance = 13301.0,
                 monthlyTarget = 250.0,
-                aprPercent = 6.0,
+                aprPercent = 3.0,
                 isHighInterest = false
             )
         )
@@ -174,10 +174,10 @@ class ExampleUnitTest {
         val profile = createInitialProfile()
         // High interest debts paid off!
         val debts = listOf(
-            DebtEntity(key = "MAYBANK_CC", name = "Maybank Credit Card", initialBalance = 10093.43, currentBalance = 0.0, monthlyTarget = 1200.0, aprPercent = 18.0, isHighInterest = true),
+            DebtEntity(key = "MAYBANK_CC", name = "Maybank Credit Card", initialBalance = 10093.43, currentBalance = 0.0, monthlyTarget = 1200.0, aprPercent = 15.0, isHighInterest = true),
             DebtEntity(key = "SHOPEE_SLOAN", name = "Shopee SLoan", initialBalance = 1983.33, currentBalance = 0.0, monthlyTarget = 283.33, aprPercent = 18.0, isHighInterest = true),
-            DebtEntity(key = "HL_HP1", name = "Hong Leong Car HP1", initialBalance = 7267.0, currentBalance = 7267.0, monthlyTarget = 530.0, aprPercent = 6.0, isHighInterest = false),
-            DebtEntity(key = "AMBANK_HP2", name = "AmBank Car HP2", initialBalance = 13301.0, currentBalance = 13301.0, monthlyTarget = 250.0, aprPercent = 6.0, isHighInterest = false)
+            DebtEntity(key = "HL_HP1", name = "Hong Leong Car HP1", initialBalance = 7267.0, currentBalance = 7267.0, monthlyTarget = 530.0, aprPercent = 3.0, isHighInterest = false),
+            DebtEntity(key = "AMBANK_HP2", name = "AmBank Car HP2", initialBalance = 13301.0, currentBalance = 13301.0, monthlyTarget = 250.0, aprPercent = 3.0, isHighInterest = false)
         )
 
         val journey = FlowchartCalculator.calculateJourney(
@@ -255,5 +255,32 @@ class ExampleUnitTest {
     fun testDecemberDetection() {
         assertTrue(DateUtils.isDecember("2026-12"))
         assertFalse(DateUtils.isDecember("2026-11"))
+    }
+
+    @Test
+    fun testDebtConfigurationRatesAndHpBehavior() {
+        val debts = createInitialDebts()
+        val mbCc = debts.first { it.key == "MAYBANK_CC" }
+        val sloan = debts.first { it.key == "SHOPEE_SLOAN" }
+        val hp1 = debts.first { it.key == "HL_HP1" }
+        val hp2 = debts.first { it.key == "AMBANK_HP2" }
+
+        // 1. Maybank Credit Card: 15% p.a., high interest priority
+        assertEquals(15.0, mbCc.aprPercent, 0.01)
+        assertTrue(mbCc.isHighInterest)
+
+        // 2. Shopee SLoan: 1.5% monthly provisional (18% p.a.), high interest priority
+        assertEquals(18.0, sloan.aprPercent, 0.01)
+        assertTrue(sloan.isHighInterest)
+
+        // 3. Hong Leong HP1: 3% reference
+        assertEquals(3.0, hp1.aprPercent, 0.01)
+        assertFalse(hp1.isHighInterest)
+
+        // 4. AmBank HP2: 3% reference, full legal loan balance tracked, user contribution RM250
+        assertEquals(3.0, hp2.aprPercent, 0.01)
+        assertFalse(hp2.isHighInterest)
+        assertEquals(13301.0, hp2.currentBalance, 0.01)
+        assertEquals(250.0, hp2.monthlyTarget, 0.01)
     }
 }

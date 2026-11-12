@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.DebtEntity
 import com.example.data.model.FinancialProfileEntity
+import com.example.ui.theme.SuccessGreen
 import com.example.logic.FlowchartCalculator
 import com.example.util.DateUtils
 
@@ -359,38 +360,88 @@ fun ProfileSettingsScreen(
 
                     debts.forEach { debt ->
                         var editBal by remember(debt.currentBalance) { mutableStateOf(debt.currentBalance.toString()) }
-                        Row(
+                        val rateLabel = when (debt.key) {
+                            "MAYBANK_CC" -> "15% p.a."
+                            "SHOPEE_SLOAN" -> "1.5% monthly (provisional)"
+                            "HL_HP1" -> "3% (reference only)"
+                            "AMBANK_HP2" -> "3% (reference only)"
+                            else -> "${debt.aprPercent}% p.a."
+                        }
+                        val isHp = debt.key == "HL_HP1" || debt.key == "AMBANK_HP2"
+                        val isSettled = debt.currentBalance <= 0.01
+
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(vertical = 6.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = debt.name,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                                )
-                                Text(
-                                    text = "Monthly Target: ${DateUtils.formatCurrency(debt.monthlyTarget)}",
-                                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = debt.name,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                        )
+                                        if (isSettled) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                color = SuccessGreen.copy(alpha = 0.15f),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "SETTLED",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        color = SuccessGreen,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 9.sp
+                                                    ),
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        text = "Rate: $rateLabel • Monthly Target: ${DateUtils.formatCurrency(debt.monthlyTarget)}",
+                                        style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    )
+                                    if (debt.key == "AMBANK_HP2") {
+                                        Text(
+                                            text = "Note: RM250 is user personal contribution; legal loan balance is tracked in full.",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontSize = 11.sp
+                                            )
+                                        )
+                                    } else if (isHp) {
+                                        Text(
+                                            text = "Note: 3% is reference only. No automatic principal deduction. Update from lender statement.",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontSize = 11.sp
+                                            )
+                                        )
+                                    }
+                                }
+                                OutlinedTextField(
+                                    value = editBal,
+                                    onValueChange = {
+                                        editBal = it
+                                        val newBal = it.toDoubleOrNull()
+                                        if (newBal != null && newBal >= 0.0) {
+                                            onUpdateDebt(debt.key, newBal)
+                                        }
+                                    },
+                                    label = { Text(if (isHp) "Lender Balance" else "Balance") },
+                                    prefix = { Text("RM ") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.width(140.dp)
                                 )
                             }
-                            OutlinedTextField(
-                                value = editBal,
-                                onValueChange = {
-                                    editBal = it
-                                    val newBal = it.toDoubleOrNull()
-                                    if (newBal != null && newBal >= 0.0) {
-                                        onUpdateDebt(debt.key, newBal)
-                                    }
-                                },
-                                label = { Text("Balance") },
-                                prefix = { Text("RM ") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                modifier = Modifier.width(150.dp)
-                            )
                         }
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.surfaceVariant)
                     }

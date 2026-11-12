@@ -47,6 +47,14 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun testWidgetRemoteViewsInflation() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val views = android.widget.RemoteViews(context.packageName, R.layout.widget_expense)
+        val inflated = views.apply(context, null)
+        assertNotNull(inflated)
+    }
+
+    @Test
     fun testExpenseInsertionAndMonthlyTotal() = runBlocking {
         val expenseDao = db.expenseDao()
         val expense1 = ExpenseEntity(
@@ -145,5 +153,21 @@ class ExampleRobolectricTest {
         assertNotNull(record)
         assertTrue(record?.isConfirmed == true)
         assertEquals("Budget and essential standing orders verified", record?.notes)
+    }
+
+    @Test
+    fun testWidgetBuildViewsAndFormatting() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val views = com.example.widget.ExpenseWidgetProvider.buildViews(context, "2026-11", 245.50, 4)
+        val inflated = views.apply(context, null)
+        assertNotNull(inflated)
+
+        val amountView = inflated.findViewById<android.widget.TextView>(R.id.widget_amount)
+        assertNotNull(amountView)
+        assertEquals("RM 245.50", amountView.text.toString())
+
+        val countView = inflated.findViewById<android.widget.TextView>(R.id.widget_count)
+        assertNotNull(countView)
+        assertEquals("4 expenses recorded", countView.text.toString())
     }
 }

@@ -19,32 +19,43 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         if (appWidgetIds.isEmpty()) return
+        val appContext = context.applicationContext
+
+        // 1. Immediately apply initial layout synchronously so launcher has a rendered view instantly
+        for (appWidgetId in appWidgetIds) {
+            val initialViews = buildViews(appContext, DateUtils.getCurrentMonthKey(), 0.0, 0)
+            appWidgetManager.updateAppWidget(appWidgetId, initialViews)
+        }
+
+        // 2. Fetch fresh DB totals in background and update
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val db = AppDatabase.getDatabase(context)
+                val db = AppDatabase.getDatabase(appContext)
                 val monthKey = DateUtils.getCurrentMonthKey()
                 val expenses = db.expenseDao().getExpensesForMonthDirect(monthKey)
                 val total = expenses.sumOf { it.amount }
                 val count = expenses.size
 
                 for (appWidgetId in appWidgetIds) {
-                    val views = buildViews(context, monthKey, total, count)
+                    val views = buildViews(appContext, monthKey, total, count)
                     appWidgetManager.updateAppWidget(appWidgetId, views)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
-                pendingResult.finish()
+                try {
+                    pendingResult.finish()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == AppWidgetManager.ACTION_APPWIDGET_UPDATE ||
-            intent.action == ACTION_REFRESH_WIDGET
-        ) {
+        if (intent.action == ACTION_REFRESH_WIDGET) {
             updateAllWidgets(context)
         }
     }
@@ -67,7 +78,7 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
             views.setTextViewText(R.id.widget_amount, DateUtils.formatCurrency(total))
             views.setTextViewText(
                 R.id.widget_count,
-                "$count ${if (count == 1) "entry" else "entries"} recorded this month"
+                "$count ${if (count == 1) "expense" else "expenses"} recorded"
             )
 
             // Intent to open quick expense dialog directly in MainActivity
@@ -85,26 +96,28 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
             )
 
             views.setOnClickPendingIntent(R.id.widget_btn_add, pendingIntent)
+            views.setOnClickPendingIntent(R.id.widget_btn_text, pendingIntent)
             views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
             return views
         }
 
         fun updateAllWidgets(context: Context) {
-            val appWidgetManager = AppWidgetManager.getInstance(context) ?: return
-            val thisWidget = ComponentName(context, ExpenseWidgetProvider::class.java)
+            val appContext = context.applicationContext
+            val appWidgetManager = AppWidgetManager.getInstance(appContext) ?: return
+            val thisWidget = ComponentName(appContext, ExpenseWidgetProvider::class.java)
             val allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget)
             if (allWidgetIds.isEmpty()) return
 
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val db = AppDatabase.getDatabase(context)
+                    val db = AppDatabase.getDatabase(appContext)
                     val monthKey = DateUtils.getCurrentMonthKey()
                     val expenses = db.expenseDao().getExpensesForMonthDirect(monthKey)
                     val total = expenses.sumOf { it.amount }
                     val count = expenses.size
 
                     for (widgetId in allWidgetIds) {
-                        val views = buildViews(context, monthKey, total, count)
+                        val views = buildViews(appContext, monthKey, total, count)
                         appWidgetManager.updateAppWidget(widgetId, views)
                     }
                 } catch (e: Exception) {
