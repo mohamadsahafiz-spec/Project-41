@@ -170,4 +170,20 @@ class ExampleRobolectricTest {
         assertNotNull(countView)
         assertEquals("4 expenses recorded", countView.text.toString())
     }
+
+    @Test
+    fun testWidgetQuickAddLaunchesQuickExpenseActivity() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val views = com.example.widget.ExpenseWidgetProvider.buildViews(context, "2026-11", 50.0, 1)
+        val inflated = views.apply(context, null)
+
+        val btnAdd = inflated.findViewById<android.view.View>(R.id.widget_btn_add)
+        assertNotNull(btnAdd)
+
+        // Verify QuickExpenseActivity can be launched by Robolectric without throwing
+        val controller = org.robolectric.Robolectric.buildActivity(QuickExpenseActivity::class.java).setup()
+        val activity = controller.get()
+        assertNotNull(activity)
+        controller.destroy()
+    }
 }

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
 import com.example.MainActivity
+import com.example.QuickExpenseActivity
 import com.example.R
 import com.example.data.AppDatabase
 import com.example.util.DateUtils
@@ -81,23 +82,33 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
                 "$count ${if (count == 1) "expense" else "expenses"} recorded"
             )
 
-            // Intent to open quick expense dialog directly in MainActivity
-            val addExpenseIntent = Intent(context, MainActivity::class.java).apply {
-                action = ACTION_ADD_EXPENSE
-                putExtra("OPEN_EXPENSE_DIALOG", true)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            // 1. Intent to open compact floating QuickExpenseActivity directly (does NOT open MainActivity)
+            val quickExpenseIntent = Intent(context, QuickExpenseActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
 
-            val pendingIntent = PendingIntent.getActivity(
+            val quickExpensePendingIntent = PendingIntent.getActivity(
                 context,
-                2001,
-                addExpenseIntent,
+                2002,
+                quickExpenseIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            views.setOnClickPendingIntent(R.id.widget_btn_add, pendingIntent)
-            views.setOnClickPendingIntent(R.id.widget_btn_text, pendingIntent)
-            views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
+            // 2. Intent to open full Project 41 app when tapping widget background/title
+            val openAppIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+
+            val openAppPendingIntent = PendingIntent.getActivity(
+                context,
+                2001,
+                openAppIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            views.setOnClickPendingIntent(R.id.widget_btn_add, quickExpensePendingIntent)
+            views.setOnClickPendingIntent(R.id.widget_btn_text, quickExpensePendingIntent)
+            views.setOnClickPendingIntent(R.id.widget_root, openAppPendingIntent)
             return views
         }
 

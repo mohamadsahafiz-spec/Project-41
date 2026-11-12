@@ -22,6 +22,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".QuickExpenseActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Project41.Dialog"
+            android:windowSoftInputMode="adjustResize"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:noHistory="true" />
         <receiver
             android:name=".widget.ExpenseWidgetProvider"
             android:exported="true">
