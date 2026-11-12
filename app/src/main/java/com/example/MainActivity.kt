@@ -286,7 +286,18 @@ fun MainAppScreen(viewModel: MainViewModel) {
                         onSaveIncome = { income -> viewModel.saveMonthlyIncome(income) },
                         onConfirmBatchPayments = { payments -> viewModel.confirmBatchPayments(payments) },
                         onUnmarkCommitment = { item -> viewModel.unmarkCommitment(item) },
-                        onUpdateRecurringDefault = { item, def -> viewModel.updateRecurringDefault(item, def) }
+                        onUpdateRecurringDefault = { item, def -> viewModel.updateRecurringDefault(item, def) },
+                        profile = profile,
+                        summary = monthlySummary,
+                        savingsAccounts = savingsAccounts,
+                        totalEmergencyFund = totalEmergencyFund,
+                        totalDedicatedSavings = totalDedicatedSavings,
+                        journeyState = journeyState,
+                        debts = debts,
+                        onDepositToSavings = { id, amt, fromCash, note -> viewModel.depositToSavings(id, amt, fromCash, note) },
+                        onWithdrawFromSavings = { id, amt, toCash, note -> viewModel.withdrawFromSavings(id, amt, toCash, note) },
+                        onCreditInterestToSavings = { id, amt, note -> viewModel.creditInterestToSavings(id, amt, note) },
+                        onNavigateToDashboard = { currentTab = ScreenTab.DASHBOARD }
                     )
                 }
                 ScreenTab.VAULT -> {

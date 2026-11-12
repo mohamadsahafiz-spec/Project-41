@@ -5,8 +5,10 @@
     android:layout_height="match_parent"
     android:background="@drawable/widget_background"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:gravity="center_vertical"
+    android:padding="14dp">
 
+    <!-- Top Status / Header Row -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -19,8 +21,8 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="PROJECT 41"
-            android:textColor="#A1A1AA"
-            android:textSize="11sp"
+            android:textColor="#9CA3AF"
+            android:textSize="10sp"
             android:textStyle="bold" />
 
         <TextView
@@ -29,51 +31,69 @@
             android:layout_height="wrap_content"
             android:text="Nov 2026"
             android:textColor="#10B981"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textStyle="bold" />
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/widget_amount"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text="RM 0.00"
-        android:textColor="#FFFFFF"
-        android:textSize="22sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/widget_count"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:text="0 expenses recorded"
-        android:textColor="#71717A"
-        android:textSize="11sp" />
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_height="4dp" />
 
+    <!-- Main Content Row: Prioritised Spending on Left, Compact Quick Add Button on Right -->
     <LinearLayout
-        android:id="@+id/widget_btn_add"
         android:layout_width="match_parent"
-        android:layout_height="38dp"
-        android:background="@drawable/widget_button_bg"
-        android:gravity="center"
-        android:orientation="horizontal"
-        android:paddingLeft="12dp"
-        android:paddingRight="12dp">
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/widget_btn_text"
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_amount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RM 0.00"
+                android:textColor="#FFFFFF"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="0 expenses recorded"
+                android:textColor="#94A3B8"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Compact Green Quick Add Action -->
+        <LinearLayout
+            android:id="@+id/widget_btn_add"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="+ Quick Add Expense"
-            android:textColor="#052E16"
-            android:textSize="13sp"
-            android:textStyle="bold" />
+            android:layout_marginStart="8dp"
+            android:background="@drawable/widget_button_bg"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingLeft="12dp"
+            android:paddingTop="7dp"
+            android:paddingRight="12dp"
+            android:paddingBottom="7dp">
+
+            <TextView
+                android:id="@+id/widget_btn_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="+ Quick Add"
+                android:textColor="#022C17"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>
+

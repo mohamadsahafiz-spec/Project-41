@@ -24,7 +24,7 @@
         </activity>
         <activity
             android:name=".QuickExpenseActivity"
-            android:exported="true"
+            android:exported="false"
             android:theme="@style/Theme.Project41.Dialog"
             android:windowSoftInputMode="adjustResize"
             android:excludeFromRecents="true"

@@ -434,15 +434,23 @@ class FinancialRepository(private val context: Context) {
         val incomeRecord = monthlyIncomeDao.getIncomeForMonthDirect(monthKey)
         val grossSalary = incomeRecord?.grossSalary ?: profile.basicSalary
         val netSalary = incomeRecord?.netSalary ?: profile.netMonthlySalary
-        val variableIncome = (incomeRecord?.overtime ?: 0.0) + (incomeRecord?.incentives ?: 0.0) +
-                (incomeRecord?.thirteenthMonth ?: 0.0) + (incomeRecord?.otherIncome ?: 0.0)
+        val overtime = incomeRecord?.overtime ?: 0.0
+        val incentives = incomeRecord?.incentives ?: 0.0
+        val thirteenthMonth = incomeRecord?.thirteenthMonth ?: 0.0
+        val otherIncome = incomeRecord?.otherIncome ?: 0.0
+        val variableIncome = overtime + incentives + thirteenthMonth + otherIncome
         val totalIncome = netSalary + variableIncome
 
-        val kwspBreakdown = KwspCalculator.calculateKwsp(
-            grossSalary = grossSalary,
-            actualEmployeeAmount = incomeRecord?.actualEmployeeKwsp,
-            actualEmployerAmount = incomeRecord?.actualEmployerKwsp
-        )
+        val kwspBreakdown = if (incomeRecord != null) {
+            KwspCalculator.calculateFromMonthlyIncome(incomeRecord)
+        } else {
+            KwspCalculator.calculateKwsp(
+                grossSalary = grossSalary,
+                actualEmployeeAmount = null,
+                actualEmployerAmount = null
+            )
+        }
+
 
         val plannedCommitments = commitments.sumOf { it.defaultAmount }
         var paidCommitments = 0.0

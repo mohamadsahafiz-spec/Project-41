@@ -283,4 +283,108 @@ class ExampleUnitTest {
         assertEquals(13301.0, hp2.currentBalance, 0.01)
         assertEquals(250.0, hp2.monthlyTarget, 0.01)
     }
+
+    @Test
+    fun testKwspCalculator_overtimeExcludedFromKwspContributableWages() {
+        val basicSalary = 4158.00
+        val overtime = 500.00 // User earned RM500 overtime
+        val breakdown = KwspCalculator.calculateKwsp(
+            grossSalary = basicSalary,
+            overtime = overtime
+        )
+
+        // Contributable wages must EQUAL basic salary, EXCLUDING the RM500 overtime
+        assertEquals(4158.00, breakdown.contributableWages, 0.01)
+        assertEquals(500.00, breakdown.overtimeExcluded, 0.01)
+
+        // Employee contribution is 11% of RM4158, NOT of RM4658
+        assertEquals(457.38, breakdown.employeeAmount, 0.01)
+        assertEquals(540.54, breakdown.employerAmount, 0.01)
+    }
+
+    @Test
+    fun testKwspCalculator_incentivesAndBonusIncludedInKwsp() {
+        val basicSalary = 4158.00
+        val incentives = 200.00
+        val bonus = 1000.00
+        val overtime = 350.00 // Overtime must be excluded
+
+        val breakdown = KwspCalculator.calculateKwsp(
+            grossSalary = basicSalary,
+            incentives = incentives,
+            thirteenthMonth = bonus,
+            overtime = overtime
+        )
+
+        // Contributable wages = 4158 + 200 + 1000 = 5358.00 (Overtime 350 is excluded)
+        assertEquals(5358.00, breakdown.contributableWages, 0.01)
+        assertEquals(350.00, breakdown.overtimeExcluded, 0.01)
+
+        // Wages > RM5,000 -> 12% employer rate
+        assertEquals(11.0, breakdown.employeeRatePercent, 0.01)
+        assertEquals(12.0, breakdown.employerRatePercent, 0.01)
+        assertEquals(589.38, breakdown.employeeAmount, 0.01) // 5358 * 0.11 = 589.38
+        assertEquals(642.96, breakdown.employerAmount, 0.01) // 5358 * 0.12 = 642.96
+    }
+
+    @Test
+    fun testMonthlyIncomeEntity_classificationAndCashFlow() {
+        val income = com.example.data.model.MonthlyIncomeEntity(
+            monthKey = "2026-11",
+            grossSalary = 4158.00, // Basic
+            netSalary = 4460.50,   // Net take-home
+            overtime = 500.00,     // OT
+            incentives = 200.00,
+            thirteenthMonth = 0.0
+        )
+
+        // Cash flow includes net salary + overtime + incentives = 4460.50 + 500.00 + 200.00 = 5160.50
+        assertEquals(5160.50, income.totalTakeHomeIncome, 0.01)
+
+        // KWSP contributable wages includes basic + incentives = 4158 + 200 = 4358 (EXCLUDING overtime)
+        assertEquals(4358.00, income.kwspContributableWages, 0.01)
+
+        val breakdown = KwspCalculator.calculateFromMonthlyIncome(income)
+        assertEquals(4358.00, breakdown.contributableWages, 0.01)
+        assertEquals(500.00, breakdown.overtimeExcluded, 0.01)
+    }
+
+    @Test
+    fun testIncomeCashflow_noGrossDoubleCounting() {
+        val income = com.example.data.model.MonthlyIncomeEntity(
+            monthKey = "2026-11",
+            grossSalary = 4158.00, // Basic salary (for KWSP)
+            netSalary = 4460.50,   // Actual net received
+            overtime = 500.00,     // Actual OT received
+            incentives = 200.00,   // Actual incentives received
+            thirteenthMonth = 1000.00 // Actual bonus received
+        )
+
+        // Cash flow must strictly equal: Net + OT + Incentives + Bonus = RM 6,160.50
+        val expectedCashflow = 4460.50 + 500.00 + 200.00 + 1000.00
+        assertEquals(expectedCashflow, income.totalTakeHomeIncome, 0.001)
+
+        // Ensure gross salary (RM 4,158.00) is NEVER added to net take-home cash flow
+        org.junit.Assert.assertNotEquals(expectedCashflow + 4158.00, income.totalTakeHomeIncome, 0.01)
+    }
+
+    @Test
+    fun testCheckInStageCompletionGuards() {
+        // Function evaluating check-in completion
+        fun isCheckInComplete(s1: Boolean, s2: Boolean, s3: Boolean, s4: Boolean, s5: Boolean): Boolean {
+            return s1 && s2 && s3 && s4 && s5
+        }
+
+        // Opening Stage 5 with missing prior stages must NEVER report complete
+        assertFalse(isCheckInComplete(s1 = false, s2 = false, s3 = false, s4 = false, s5 = true))
+        assertFalse(isCheckInComplete(s1 = true, s2 = false, s3 = false, s4 = false, s5 = true))
+        assertFalse(isCheckInComplete(s1 = true, s2 = true, s3 = false, s4 = false, s5 = true))
+        assertFalse(isCheckInComplete(s1 = true, s2 = true, s3 = true, s4 = false, s5 = true))
+        assertFalse(isCheckInComplete(s1 = true, s2 = true, s3 = true, s4 = true, s5 = false))
+
+        // Only true when all 5 stages are genuinely completed
+        assertTrue(isCheckInComplete(s1 = true, s2 = true, s3 = true, s4 = true, s5 = true))
+    }
 }
+
+

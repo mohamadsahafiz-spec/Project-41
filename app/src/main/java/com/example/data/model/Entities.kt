@@ -130,9 +130,13 @@ data class MonthlyIncomeEntity(
     val actualEmployerKwsp: Double? = null,
     val updatedTimestamp: Long = System.currentTimeMillis()
 ) {
+    val kwspContributableWages: Double
+        get() = grossSalary + incentives + thirteenthMonth
+
     val totalTakeHomeIncome: Double
         get() = netSalary + overtime + incentives + thirteenthMonth + otherIncome
 }
+
 
 /**
  * Flowchart Step Verification: Allows user review and confirmation for Step 0 (Budgeting) and Step 2 (Workplace match)

@@ -3,6 +3,7 @@ package com.example.widget
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -14,7 +15,10 @@ import com.example.data.AppDatabase
 import com.example.util.DateUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ExpenseWidgetProvider : AppWidgetProvider() {
 
@@ -28,22 +32,14 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
             appWidgetManager.updateAppWidget(appWidgetId, initialViews)
         }
 
-        // 2. Fetch fresh DB totals in background and update
+        // 2. Fetch fresh DB totals in managed background coroutine with goAsync()
         val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
+        val targetIds = appWidgetIds.clone()
+        refreshScope.launch {
             try {
-                val db = AppDatabase.getDatabase(appContext)
-                val monthKey = DateUtils.getCurrentMonthKey()
-                val expenses = db.expenseDao().getExpensesForMonthDirect(monthKey)
-                val total = expenses.sumOf { it.amount }
-                val count = expenses.size
-
-                for (appWidgetId in appWidgetIds) {
-                    val views = buildViews(appContext, monthKey, total, count)
-                    appWidgetManager.updateAppWidget(appWidgetId, views)
+                refreshMutex.withLock {
+                    performWidgetUpdate(appContext, targetIds)
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             } finally {
                 try {
                     pendingResult.finish()
@@ -57,18 +53,23 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         if (intent.action == ACTION_REFRESH_WIDGET) {
-            updateAllWidgets(context)
+            val pendingResult = goAsync()
+            updateAllWidgets(context, pendingResult)
         }
     }
 
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
-        updateAllWidgets(context)
+        val pendingResult = goAsync()
+        updateAllWidgets(context, pendingResult)
     }
 
     companion object {
         const val ACTION_ADD_EXPENSE = "com.aistudio.freedomtracker.ACTION_ADD_EXPENSE"
         const val ACTION_REFRESH_WIDGET = "com.aistudio.project41.REFRESH_WIDGET"
+
+        private val refreshScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        private val refreshMutex = Mutex()
 
         fun buildViews(context: Context, monthKey: String, total: Double, count: Int): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_expense)
@@ -112,27 +113,52 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
             return views
         }
 
-        fun updateAllWidgets(context: Context) {
+        /**
+         * Safely performs database fetch and updates RemoteViews.
+         * Serialized via refreshMutex to prevent race conditions or duplicate overlapping queries.
+         */
+        private suspend fun performWidgetUpdate(appContext: Context, widgetIds: IntArray? = null) {
+            try {
+                val appWidgetManager = AppWidgetManager.getInstance(appContext) ?: return
+                val targetIds = widgetIds ?: run {
+                    val thisWidget = ComponentName(appContext, ExpenseWidgetProvider::class.java)
+                    appWidgetManager.getAppWidgetIds(thisWidget)
+                }
+                if (targetIds.isEmpty()) return
+
+                val db = AppDatabase.getDatabase(appContext)
+                val monthKey = DateUtils.getCurrentMonthKey()
+                val expenses = db.expenseDao().getExpensesForMonthDirect(monthKey)
+                val total = expenses.sumOf { it.amount }
+                val count = expenses.size
+
+                for (widgetId in targetIds) {
+                    val views = buildViews(appContext, monthKey, total, count)
+                    appWidgetManager.updateAppWidget(widgetId, views)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        /**
+         * Updates all instances of ExpenseWidgetProvider.
+         * When triggered by a BroadcastReceiver, pass [pendingResult] to guarantee completion via goAsync().
+         * When triggered by repository/UI coroutines, [pendingResult] defaults to null.
+         */
+        fun updateAllWidgets(context: Context, pendingResult: BroadcastReceiver.PendingResult? = null) {
             val appContext = context.applicationContext
-            val appWidgetManager = AppWidgetManager.getInstance(appContext) ?: return
-            val thisWidget = ComponentName(appContext, ExpenseWidgetProvider::class.java)
-            val allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget)
-            if (allWidgetIds.isEmpty()) return
-
-            CoroutineScope(Dispatchers.IO).launch {
+            refreshScope.launch {
                 try {
-                    val db = AppDatabase.getDatabase(appContext)
-                    val monthKey = DateUtils.getCurrentMonthKey()
-                    val expenses = db.expenseDao().getExpensesForMonthDirect(monthKey)
-                    val total = expenses.sumOf { it.amount }
-                    val count = expenses.size
-
-                    for (widgetId in allWidgetIds) {
-                        val views = buildViews(appContext, monthKey, total, count)
-                        appWidgetManager.updateAppWidget(widgetId, views)
+                    refreshMutex.withLock {
+                        performWidgetUpdate(appContext)
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                } finally {
+                    try {
+                        pendingResult?.finish()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             }
         }
