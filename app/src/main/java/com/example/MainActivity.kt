@@ -126,6 +126,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
     val totalEmergencyFund by viewModel.totalEmergencyFund.collectAsStateWithLifecycle()
     val totalInterestCredited by viewModel.totalInterestCredited.collectAsStateWithLifecycle()
     val currentMonthIncome by viewModel.currentMonthIncome.collectAsStateWithLifecycle()
+    val currentMonthPaydayAllocation by viewModel.currentMonthPaydayAllocation.collectAsStateWithLifecycle()
 
     val totalSpendingThisMonth = remember(currentMonthExpenses) {
         currentMonthExpenses.sumOf { it.amount }
@@ -294,6 +295,8 @@ fun MainAppScreen(viewModel: MainViewModel) {
                         totalDedicatedSavings = totalDedicatedSavings,
                         journeyState = journeyState,
                         debts = debts,
+                        currentPaydayAllocation = currentMonthPaydayAllocation,
+                        onSavePaydayAllocation = { allocation -> viewModel.savePaydayAllocation(allocation) },
                         onDepositToSavings = { id, amt, fromCash, note -> viewModel.depositToSavings(id, amt, fromCash, note) },
                         onWithdrawFromSavings = { id, amt, toCash, note -> viewModel.withdrawFromSavings(id, amt, toCash, note) },
                         onCreditInterestToSavings = { id, amt, note -> viewModel.creditInterestToSavings(id, amt, note) },

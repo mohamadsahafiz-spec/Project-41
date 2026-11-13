@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -62,10 +64,14 @@ import com.example.data.MonthlySummaryData
 import com.example.data.model.DebtEntity
 import com.example.data.model.FinancialProfileEntity
 import com.example.data.model.MonthlyIncomeEntity
+import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
 import com.example.logic.FlowchartJourneyState
 import com.example.logic.KwspCalculator
+import com.example.ui.components.paydayIntelligenceStageItems
+import com.example.ui.components.rememberPaydayPlanState
 import com.example.ui.theme.DangerRed
+import com.example.ui.theme.InfoBlue
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.WarningGold
 import com.example.util.DateUtils
@@ -86,20 +92,23 @@ fun CommitmentsScreen(
     totalDedicatedSavings: Double = 0.0,
     journeyState: FlowchartJourneyState? = null,
     debts: List<DebtEntity> = emptyList(),
+    currentPaydayAllocation: PaydayAllocationEntity? = null,
+    onSavePaydayAllocation: ((PaydayAllocationEntity) -> Unit)? = null,
     onDepositToSavings: ((accountId: Long, amount: Double, fromEverydayCash: Boolean, note: String) -> Unit)? = null,
     onWithdrawFromSavings: ((accountId: Long, amount: Double, toEverydayCash: Boolean, note: String) -> Unit)? = null,
     onCreditInterestToSavings: ((accountId: Long, amount: Double, note: String) -> Unit)? = null,
     onNavigateToDashboard: (() -> Unit)? = null
 ) {
-    // Current Active Stage (1 to 5)
+    // Current Active Stage (1 to 6)
     var currentStage by remember { mutableStateOf(1) }
 
     // Explicit completion flags — opening a stage NEVER automatically marks it complete
     var isStage1Complete by remember(currentIncome) { mutableStateOf(currentIncome != null) }
-    var isStage2Complete by remember { mutableStateOf(false) }
+    var isStage2Complete by remember(currentPaydayAllocation) { mutableStateOf(currentPaydayAllocation?.isApproved == true) }
     var isStage3Complete by remember { mutableStateOf(false) }
     var isStage4Complete by remember { mutableStateOf(false) }
     var isStage5Complete by remember { mutableStateOf(false) }
+    var isStage6Complete by remember { mutableStateOf(false) }
 
     var updateDefaultItem by remember { mutableStateOf<MonthlyCommitmentItem?>(null) }
     var selectedAccountForDeposit by remember { mutableStateOf<SavingsAccountEntity?>(null) }
@@ -125,6 +134,10 @@ fun CommitmentsScreen(
     var overtimeText by remember(currentIncome) { mutableStateOf((currentIncome?.overtime ?: 0.0).toString()) }
     var incentivesText by remember(currentIncome) { mutableStateOf((currentIncome?.incentives ?: 0.0).toString()) }
     var thirteenthMonthText by remember(currentIncome) { mutableStateOf((currentIncome?.thirteenthMonth ?: 0.0).toString()) }
+    var otherIncomeText by remember(currentIncome) { mutableStateOf((currentIncome?.otherIncome ?: 0.0).toString()) }
+    var reimbursementsText by remember(currentIncome) { mutableStateOf((currentIncome?.reimbursements ?: 0.0).toString()) }
+    var unconfirmedIncomeText by remember(currentIncome) { mutableStateOf((currentIncome?.unconfirmedIncome ?: 0.0).toString()) }
+    var isIncomeConfirmed by remember(currentIncome) { mutableStateOf(currentIncome?.isConfirmedReceived ?: true) }
     var actualEmployeeKwspText by remember(currentIncome) { mutableStateOf(currentIncome?.actualEmployeeKwsp?.toString() ?: "") }
     var actualEmployerKwspText by remember(currentIncome) { mutableStateOf(currentIncome?.actualEmployerKwsp?.toString() ?: "") }
 
@@ -133,9 +146,16 @@ fun CommitmentsScreen(
     val overtimeVal = overtimeText.toDoubleOrNull() ?: 0.0
     val incentivesVal = incentivesText.toDoubleOrNull() ?: 0.0
     val thirteenthMonthVal = thirteenthMonthText.toDoubleOrNull() ?: 0.0
+    val otherIncomeVal = otherIncomeText.toDoubleOrNull() ?: 0.0
+    val reimbursementsVal = reimbursementsText.toDoubleOrNull() ?: 0.0
+    val unconfirmedIncomeVal = unconfirmedIncomeText.toDoubleOrNull() ?: 0.0
 
-    // Actual take-home cash flow: Net salary + actual additional amounts received
-    val actualTakeHomeCashflow = netSalaryVal + overtimeVal + incentivesVal + thirteenthMonthVal
+    // Actual take-home cash flow: Confirmed Net salary + actual additional amounts received (excludes gross, reimbursements, and unconfirmed income)
+    val actualTakeHomeCashflow = if (isIncomeConfirmed) {
+        netSalaryVal + overtimeVal + incentivesVal + thirteenthMonthVal + otherIncomeVal
+    } else {
+        0.0
+    }
 
     // KWSP calculation strictly excludes overtime from contributable wages
     val kwspBreakdown = KwspCalculator.calculateKwsp(
@@ -152,10 +172,44 @@ fun CommitmentsScreen(
         2 to isStage2Complete,
         3 to isStage3Complete,
         4 to isStage4Complete,
-        5 to isStage5Complete
+        5 to isStage5Complete,
+        6 to isStage6Complete
+    )
+
+    val listState = rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(currentStage) {
+        listState.scrollToItem(0)
+    }
+
+    val effectiveIncomeForPlan = currentIncome ?: MonthlyIncomeEntity(
+        monthKey = monthKey,
+        grossSalary = gross,
+        netSalary = netSalaryVal,
+        overtime = overtimeVal,
+        incentives = incentivesVal,
+        thirteenthMonth = thirteenthMonthVal,
+        otherIncome = otherIncomeVal,
+        reimbursements = reimbursementsVal,
+        unconfirmedIncome = unconfirmedIncomeVal,
+        isConfirmedReceived = isIncomeConfirmed,
+        actualEmployeeKwsp = actualEmployeeKwspText.toDoubleOrNull(),
+        actualEmployerKwsp = actualEmployerKwspText.toDoubleOrNull()
+    )
+
+    val (paydayFormState, paydayPlan) = rememberPaydayPlanState(
+        monthKey = monthKey,
+        income = effectiveIncomeForPlan,
+        defaultNetSalary = profile?.netMonthlySalary ?: 4460.50,
+        existingEverydayCash = profile?.bankBalance ?: 0.0,
+        commitments = items,
+        debts = debts,
+        recordedExpensesThisMonth = summary?.quickExpensesTotal ?: 0.0,
+        existingEmergencyFund = totalEmergencyFund,
+        savedAllocation = currentPaydayAllocation
     )
 
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
@@ -319,17 +373,91 @@ fun CommitmentsScreen(
                             )
                         }
 
-                        // D. 13th-Month Bonus
+                        // D. 13th-Month Bonus & Other Income
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = thirteenthMonthText,
-                            onValueChange = { thirteenthMonthText = it },
-                            label = { Text("13th-Month Bonus (Actual Received)") },
-                            prefix = { Text("RM ") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = thirteenthMonthText,
+                                onValueChange = { thirteenthMonthText = it },
+                                label = { Text("Bonus / 13th Mo") },
+                                prefix = { Text("RM ") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = otherIncomeText,
+                                onValueChange = { otherIncomeText = it },
+                                label = { Text("Other Income") },
+                                prefix = { Text("RM ") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        // Reimbursements & Unconfirmed Income (Explicitly separated)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = reimbursementsText,
+                                onValueChange = { reimbursementsText = it },
+                                label = { Text("Reimbursements") },
+                                placeholder = { Text("Excluded") },
+                                prefix = { Text("RM ") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("reimbursements_input")
+                            )
+                            OutlinedTextField(
+                                value = unconfirmedIncomeText,
+                                onValueChange = { unconfirmedIncomeText = it },
+                                label = { Text("Unconfirmed Income") },
+                                placeholder = { Text("Pending") },
+                                prefix = { Text("RM ") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("unconfirmed_income_input")
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Reimbursements & unconfirmed income are tracked separately and NEVER counted as spendable cash.",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = InfoBlue)
                         )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Salary & Additional Income Confirmed Received",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = if (isIncomeConfirmed) "Counted as confirmed available payday cash" else "Marked pending — excluded from Payday allocation",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                )
+                            }
+                            Switch(
+                                checked = isIncomeConfirmed,
+                                onCheckedChange = { isIncomeConfirmed = it },
+                                modifier = Modifier.testTag("income_confirmed_switch")
+                            )
+                        }
 
                         Spacer(modifier = Modifier.height(10.dp))
 
@@ -346,13 +474,17 @@ fun CommitmentsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Total Monthly Cash Flow Received:",
+                                        text = "Confirmed Spendable Cash Flow:",
                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                                     )
                                     Text(
-                                        text = "Net (${DateUtils.formatCurrency(netSalaryVal)}) + OT (${DateUtils.formatCurrency(overtimeVal)}) + Inc (${DateUtils.formatCurrency(incentivesVal)}) + Bonus (${DateUtils.formatCurrency(thirteenthMonthVal)})",
+                                        text = if (isIncomeConfirmed) {
+                                            "Net (${DateUtils.formatCurrency(netSalaryVal)}) + OT (${DateUtils.formatCurrency(overtimeVal)}) + Inc (${DateUtils.formatCurrency(incentivesVal)}) + Bonus (${DateUtils.formatCurrency(thirteenthMonthVal)}) + Other (${DateUtils.formatCurrency(otherIncomeVal)})"
+                                        } else {
+                                            "Income marked unconfirmed — RM 0.00 spendable until confirmed"
+                                        },
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     )
                                 }
@@ -453,7 +585,7 @@ fun CommitmentsScreen(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // Stage 1 Action: Explicit Save & Continue
+                        // Stage 1 Action: Explicit Save & Continue to Payday Intelligence
                         Button(
                             onClick = {
                                 val income = MonthlyIncomeEntity(
@@ -463,6 +595,10 @@ fun CommitmentsScreen(
                                     overtime = overtimeVal,
                                     incentives = incentivesVal,
                                     thirteenthMonth = thirteenthMonthVal,
+                                    otherIncome = otherIncomeVal,
+                                    reimbursements = reimbursementsVal,
+                                    unconfirmedIncome = unconfirmedIncomeVal,
+                                    isConfirmedReceived = isIncomeConfirmed,
                                     actualEmployeeKwsp = actualEmployeeKwspText.toDoubleOrNull(),
                                     actualEmployerKwsp = actualEmployerKwspText.toDoubleOrNull()
                                 )
@@ -478,7 +614,7 @@ fun CommitmentsScreen(
                         ) {
                             Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Save & Continue to Stage 2: Commitments", fontWeight = FontWeight.Bold)
+                            Text("Save & Continue to Stage 2: Payday Plan", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -486,9 +622,27 @@ fun CommitmentsScreen(
         }
 
         // =========================================================================
-        // STAGE 2 — MONTHLY COMMITMENTS
+        // STAGE 2 — PAYDAY INTELLIGENCE V1
         // =========================================================================
         if (currentStage == 2) {
+            paydayIntelligenceStageItems(
+                monthKey = monthKey,
+                formState = paydayFormState,
+                plan = paydayPlan,
+                savedAllocation = currentPaydayAllocation,
+                onSaveAndApprovePlan = { allocation ->
+                    onSavePaydayAllocation?.invoke(allocation)
+                    isStage2Complete = true
+                    currentStage = 3
+                },
+                onBackToIncome = { currentStage = 1 }
+            )
+        }
+
+        // =========================================================================
+        // STAGE 3 — MONTHLY COMMITMENTS
+        // =========================================================================
+        if (currentStage == 3) {
             item {
                 Card(
                     modifier = Modifier
@@ -511,7 +665,7 @@ fun CommitmentsScreen(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = "2",
+                                        text = "3",
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                                         fontSize = 13.sp
@@ -521,7 +675,7 @@ fun CommitmentsScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "STAGE 2 — MONTHLY COMMITMENTS",
+                                    text = "STAGE 3 — MONTHLY COMMITMENTS",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -533,6 +687,21 @@ fun CommitmentsScreen(
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                )
+                            }
+                        }
+
+                        if (currentPaydayAllocation?.isApproved == true) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = InfoBlue.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "Payday Plan Reminder: Approved Extra Debt ${DateUtils.formatCurrency(currentPaydayAllocation.approvedExtraDebtRepayment)} • Emergency Savings ${DateUtils.formatCurrency(currentPaydayAllocation.approvedEmergencySavings)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = InfoBlue, fontWeight = FontWeight.Medium),
+                                    modifier = Modifier.padding(8.dp)
                                 )
                             }
                         }
@@ -626,7 +795,7 @@ fun CommitmentsScreen(
                 )
             }
 
-            // Stage 2 Actions
+            // Stage 3 Actions
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
@@ -634,24 +803,24 @@ fun CommitmentsScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedButton(
-                        onClick = { currentStage = 1 },
+                        onClick = { currentStage = 2 },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Stage 1")
+                        Text("Stage 2")
                     }
 
                     Button(
                         onClick = {
-                            isStage2Complete = true
-                            currentStage = 3
+                            isStage3Complete = true
+                            currentStage = 4
                         },
                         modifier = Modifier.weight(2f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Continue to Stage 3 (${selectedPayments.size} selected)")
+                        Text("Continue to Stage 4 (${selectedPayments.size} selected)")
                         Spacer(modifier = Modifier.width(6.dp))
                         Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                     }
@@ -661,9 +830,9 @@ fun CommitmentsScreen(
         }
 
         // =========================================================================
-        // STAGE 3 — PAYMENT CONFIRMATION (POKA-YOKE)
+        // STAGE 4 — PAYMENT CONFIRMATION (POKA-YOKE)
         // =========================================================================
-        if (currentStage == 3) {
+        if (currentStage == 4) {
             val selectedItemsList = items.filter { selectedPayments.containsKey(it.commitmentId) }
                 .map { it to (selectedPayments[it.commitmentId] ?: it.defaultAmount) }
 
@@ -687,7 +856,7 @@ fun CommitmentsScreen(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = "3",
+                                        text = "4",
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                                         fontSize = 13.sp
@@ -697,7 +866,7 @@ fun CommitmentsScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "STAGE 3 — PAYMENT CONFIRMATION",
+                                    text = "STAGE 4 — PAYMENT CONFIRMATION",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -738,8 +907,8 @@ fun CommitmentsScreen(
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Button(
                                         onClick = {
-                                            isStage3Complete = true
-                                            currentStage = 4
+                                            isStage4Complete = true
+                                            currentStage = 5
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(10.dp)
@@ -814,13 +983,13 @@ fun CommitmentsScreen(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         OutlinedButton(
-                            onClick = { currentStage = 2 },
+                            onClick = { currentStage = 3 },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Back to Stage 2: Adjust Selections")
+                            Text("Back to Stage 3: Adjust Selections")
                         }
                     }
                 }
@@ -828,9 +997,9 @@ fun CommitmentsScreen(
         }
 
         // =========================================================================
-        // STAGE 4 — SAVINGS VAULT
+        // STAGE 5 — SAVINGS VAULT
         // =========================================================================
-        if (currentStage == 4) {
+        if (currentStage == 5) {
             val emergencyAccounts = savingsAccounts.filter { it.isEmergencyFund }
             val otherSavingsAccounts = savingsAccounts.filter { !it.isEmergencyFund }
 
@@ -854,7 +1023,7 @@ fun CommitmentsScreen(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = "4",
+                                        text = "5",
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                                         fontSize = 13.sp
@@ -864,7 +1033,7 @@ fun CommitmentsScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "STAGE 4 — SAVINGS VAULT",
+                                    text = "STAGE 5 — SAVINGS VAULT",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -881,6 +1050,20 @@ fun CommitmentsScreen(
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
+                        if ((currentPaydayAllocation?.approvedEmergencySavings ?: 0.0) > 0.0) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = SuccessGreen.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "Payday Plan Approved Target: Deposit ${DateUtils.formatCurrency(currentPaydayAllocation?.approvedEmergencySavings ?: 0.0)} to Emergency Fund.",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = SuccessGreen, fontWeight = FontWeight.Bold),
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -955,11 +1138,11 @@ fun CommitmentsScreen(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // Stage 4 Explicit Decision Actions: User must explicitly complete savings review
+                        // Stage 5 Explicit Decision Actions: User must explicitly complete savings review
                         Button(
                             onClick = {
-                                isStage4Complete = true
-                                currentStage = 5
+                                isStage5Complete = true
+                                currentStage = 6
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -968,15 +1151,15 @@ fun CommitmentsScreen(
                         ) {
                             Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Confirm Savings Review & Proceed to Stage 5")
+                            Text("Confirm Savings Review & Proceed to Stage 6")
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
                         OutlinedButton(
                             onClick = {
-                                isStage4Complete = true
-                                currentStage = 5
+                                isStage5Complete = true
+                                currentStage = 6
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
@@ -987,12 +1170,12 @@ fun CommitmentsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         TextButton(
-                            onClick = { currentStage = 3 },
+                            onClick = { currentStage = 4 },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Back to Stage 3: Confirmations")
+                            Text("Back to Stage 4: Confirmations")
                         }
                     }
                 }
@@ -1000,9 +1183,9 @@ fun CommitmentsScreen(
         }
 
         // =========================================================================
-        // STAGE 5 — MONTHLY REVIEW (COMPLETION GUARDED)
+        // STAGE 6 — MONTHLY REVIEW (COMPLETION GUARDED)
         // =========================================================================
-        if (currentStage == 5) {
+        if (currentStage == 6) {
             val netTakeHome = currentIncome?.netSalary ?: profile?.netMonthlySalary ?: 4460.50
             val totalIncome = (currentIncome?.totalTakeHomeIncome) ?: summary?.totalIncome ?: actualTakeHomeCashflow
             val commitmentsPaid = summary?.paidCommitments ?: totalAlreadyPaid
@@ -1011,7 +1194,7 @@ fun CommitmentsScreen(
             val currentDebt = summary?.totalDebtRemaining ?: debts.sumOf { it.currentBalance }
             val kwspBalance = summary?.totalKwsp ?: profile?.totalKwsp ?: 0.0
 
-            val allPriorStagesComplete = isStage1Complete && isStage2Complete && isStage3Complete && isStage4Complete
+            val allPriorStagesComplete = isStage1Complete && isStage2Complete && isStage3Complete && isStage4Complete && isStage5Complete
 
             item {
                 Card(
@@ -1033,7 +1216,7 @@ fun CommitmentsScreen(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = "5",
+                                        text = "6",
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                                         fontSize = 13.sp
@@ -1043,7 +1226,7 @@ fun CommitmentsScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "STAGE 5 — MONTHLY REVIEW",
+                                    text = "STAGE 6 — MONTHLY REVIEW",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -1096,6 +1279,43 @@ fun CommitmentsScreen(
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("Total KWSP Retirement Balance:", style = MaterialTheme.typography.bodySmall)
                                     Text(DateUtils.formatCurrency(kwspBalance), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                                }
+                            }
+                        }
+
+                        if (currentPaydayAllocation != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = InfoBlue.copy(alpha = 0.10f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = if (currentPaydayAllocation.hasOverrides) {
+                                            "PAYDAY INTELLIGENCE PLAN (APPROVED WITH OVERRIDES)"
+                                        } else {
+                                            "PAYDAY INTELLIGENCE PLAN (APPROVED)"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = InfoBlue)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Extra Debt (Rec ${DateUtils.formatCurrency(currentPaydayAllocation.recExtraDebtRepayment)}):", style = MaterialTheme.typography.bodySmall)
+                                        Text(DateUtils.formatCurrency(currentPaydayAllocation.approvedExtraDebtRepayment), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                                    }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Emergency Savings (Rec ${DateUtils.formatCurrency(currentPaydayAllocation.recEmergencySavings)}):", style = MaterialTheme.typography.bodySmall)
+                                        Text(DateUtils.formatCurrency(currentPaydayAllocation.approvedEmergencySavings), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                                    }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Discretionary (Rec ${DateUtils.formatCurrency(currentPaydayAllocation.recDiscretionaryAllowance)}):", style = MaterialTheme.typography.bodySmall)
+                                        Text(DateUtils.formatCurrency(currentPaydayAllocation.approvedDiscretionaryAllowance), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                                    }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Remaining Buffer:", style = MaterialTheme.typography.bodySmall)
+                                        Text(DateUtils.formatCurrency(currentPaydayAllocation.approvedRemainingBuffer), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = SuccessGreen))
+                                    }
                                 }
                             }
                         }
@@ -1174,7 +1394,7 @@ fun CommitmentsScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("• Stage 2: Commitments not reviewed", style = MaterialTheme.typography.bodySmall)
+                                            Text("• Stage 2: Payday Plan not approved", style = MaterialTheme.typography.bodySmall)
                                             TextButton(onClick = { currentStage = 2 }) { Text("Go to Stage 2") }
                                         }
                                     }
@@ -1184,7 +1404,7 @@ fun CommitmentsScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("• Stage 3: Payment confirmation required", style = MaterialTheme.typography.bodySmall)
+                                            Text("• Stage 3: Commitments not reviewed", style = MaterialTheme.typography.bodySmall)
                                             TextButton(onClick = { currentStage = 3 }) { Text("Go to Stage 3") }
                                         }
                                     }
@@ -1194,17 +1414,27 @@ fun CommitmentsScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("• Stage 4: Savings review decision required", style = MaterialTheme.typography.bodySmall)
+                                            Text("• Stage 4: Payment confirmation required", style = MaterialTheme.typography.bodySmall)
                                             TextButton(onClick = { currentStage = 4 }) { Text("Go to Stage 4") }
+                                        }
+                                    }
+                                    if (!isStage5Complete) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("• Stage 5: Savings review decision required", style = MaterialTheme.typography.bodySmall)
+                                            TextButton(onClick = { currentStage = 5 }) { Text("Go to Stage 5") }
                                         }
                                     }
                                 }
                             }
-                        } else if (!isStage5Complete) {
-                            // All prior stages completed; user can now explicitly complete Stage 5
+                        } else if (!isStage6Complete) {
+                            // All prior stages completed; user can now explicitly complete Stage 6
                             Button(
                                 onClick = {
-                                    isStage5Complete = true
+                                    isStage6Complete = true
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1217,7 +1447,7 @@ fun CommitmentsScreen(
                                 Text("COMPLETE MONTHLY CHECK-IN", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
                         } else {
-                            // All 5 stages genuinely completed!
+                            // All 6 stages genuinely completed!
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 color = SuccessGreen.copy(alpha = 0.15f),
@@ -1238,7 +1468,7 @@ fun CommitmentsScreen(
                                             style = MaterialTheme.typography.titleSmall.copy(color = SuccessGreen)
                                         )
                                         Text(
-                                            text = "All 5 stages for $formattedMonth have been validated and saved.",
+                                            text = "All 6 stages for $formattedMonth have been validated and saved.",
                                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
                                         )
                                     }
@@ -1370,10 +1600,10 @@ fun CommitmentsScreen(
                             isConfirmingPayments = true
                             onConfirmBatchPayments(selectedItemsList)
                             selectedPayments.clear()
-                            isStage3Complete = true
+                            isStage4Complete = true
                             showBatchConfirmDialog = false
                             isConfirmingPayments = false
-                            currentStage = 4
+                            currentStage = 5
                         }
                     },
                     enabled = !isConfirmingPayments,
@@ -1448,11 +1678,12 @@ fun CheckInStepperBar(
     onStageClick: (Int) -> Unit
 ) {
     val stageTitles = listOf(
-        1 to "1. Income",
-        2 to "2. Commitments",
-        3 to "3. Confirm",
-        4 to "4. Savings",
-        5 to "5. Review"
+        1 to "1. Inc",
+        2 to "2. Plan",
+        3 to "3. Bills",
+        4 to "4. Cfm",
+        5 to "5. Save",
+        6 to "6. Rev"
     )
 
     Card(
@@ -1475,7 +1706,8 @@ fun CheckInStepperBar(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
                             .clickable { onStageClick(num) }
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .testTag("checkin_stage_tab_$num")
+                            .padding(horizontal = 2.dp, vertical = 2.dp)
                     ) {
                         Surface(
                             shape = CircleShape,
@@ -1484,7 +1716,7 @@ fun CheckInStepperBar(
                                 isDone -> SuccessGreen
                                 else -> MaterialTheme.colorScheme.surfaceVariant
                             },
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 if (isDone && !isActive) {
@@ -1492,7 +1724,7 @@ fun CheckInStepperBar(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.surface,
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(13.dp)
                                     )
                                 } else {
                                     Text(
@@ -1521,7 +1753,7 @@ fun CheckInStepperBar(
 
             Spacer(modifier = Modifier.height(8.dp))
             LinearProgressIndicator(
-                progress = { currentStage / 5f },
+                progress = { currentStage / 6f },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(4.dp)

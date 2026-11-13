@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.dao.AchievementDao
 import com.example.data.dao.CommitmentDao
@@ -13,6 +14,7 @@ import com.example.data.dao.FinancialProfileDao
 import com.example.data.dao.FlowchartVerificationDao
 import com.example.data.dao.MonthlyCheckInDao
 import com.example.data.dao.MonthlyIncomeDao
+import com.example.data.dao.PaydayAllocationDao
 import com.example.data.dao.SavingsAccountDao
 import com.example.data.dao.SavingsTransactionDao
 import com.example.data.model.AchievementEntity
@@ -23,6 +25,7 @@ import com.example.data.model.FinancialProfileEntity
 import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyCheckInEntity
 import com.example.data.model.MonthlyIncomeEntity
+import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
 import com.example.data.model.SavingsTransactionEntity
 
@@ -37,9 +40,10 @@ import com.example.data.model.SavingsTransactionEntity
         SavingsAccountEntity::class,
         SavingsTransactionEntity::class,
         MonthlyIncomeEntity::class,
-        FlowchartVerificationEntity::class
+        FlowchartVerificationEntity::class,
+        PaydayAllocationEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -53,10 +57,54 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun savingsTransactionDao(): SavingsTransactionDao
     abstract fun monthlyIncomeDao(): MonthlyIncomeDao
     abstract fun flowchartVerificationDao(): FlowchartVerificationDao
+    abstract fun paydayAllocationDao(): PaydayAllocationDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE monthly_incomes ADD COLUMN reimbursements REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE monthly_incomes ADD COLUMN unconfirmedIncome REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE monthly_incomes ADD COLUMN isConfirmedReceived INTEGER NOT NULL DEFAULT 1")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `payday_allocations` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `monthKey` TEXT NOT NULL,
+                        `confirmedAvailableCash` REAL NOT NULL,
+                        `reimbursementsExcluded` REAL NOT NULL,
+                        `unconfirmedIncomeExcluded` REAL NOT NULL,
+                        `upcomingEssentialExpensesInput` REAL,
+                        `emergencyFundTargetInput` REAL,
+                        `cashBufferTargetInput` REAL,
+                        `recEssentialCommitments` REAL NOT NULL,
+                        `recMinDebtPayments` REAL NOT NULL,
+                        `recUpcomingEssentials` REAL NOT NULL,
+                        `recExtraDebtRepayment` REAL NOT NULL,
+                        `recExtraDebtTargetKey` TEXT,
+                        `recEmergencySavings` REAL NOT NULL,
+                        `recDiscretionaryAllowance` REAL NOT NULL,
+                        `recRemainingBuffer` REAL NOT NULL,
+                        `approvedExtraDebtRepayment` REAL NOT NULL,
+                        `approvedEmergencySavings` REAL NOT NULL,
+                        `approvedDiscretionaryAllowance` REAL NOT NULL,
+                        `approvedRemainingBuffer` REAL NOT NULL,
+                        `hasOverrides` INTEGER NOT NULL,
+                        `isApproved` INTEGER NOT NULL,
+                        `approvedTimestamp` INTEGER,
+                        `rationaleSummary` TEXT NOT NULL,
+                        `updatedTimestamp` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_payday_allocations_monthKey` ON `payday_allocations` (`monthKey`)"
+                )
+            }
+        }
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -65,6 +113,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "freedom_tracker_db" // Preserving database name to preserve existing data
                 )
+                    .addMigrations(MIGRATION_2_3)
                     .addCallback(DatabasePrepopulateCallback())
                     .fallbackToDestructiveMigration()
                     .build()

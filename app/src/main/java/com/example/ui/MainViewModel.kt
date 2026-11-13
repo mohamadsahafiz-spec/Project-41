@@ -12,6 +12,7 @@ import com.example.data.model.ExpenseEntity
 import com.example.data.model.FinancialProfileEntity
 import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyIncomeEntity
+import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
 import com.example.logic.FlowchartCalculator
 import com.example.logic.FlowchartJourneyState
@@ -100,6 +101,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val currentMonthIncome: StateFlow<MonthlyIncomeEntity?> = _selectedMonthKey
         .flatMapLatest { key -> repository.getIncomeForMonth(key) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val currentMonthPaydayAllocation: StateFlow<PaydayAllocationEntity?> = _selectedMonthKey
+        .flatMapLatest { key -> repository.getPaydayAllocationForMonth(key) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val flowchartVerifications: StateFlow<List<FlowchartVerificationEntity>> = repository.flowchartVerificationsFlow
@@ -226,6 +231,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.saveMonthlyIncome(income)
             refreshMonthlySummary(_selectedMonthKey.value)
             _eventFlow.emit(UiEvent.ShowSnackbar("Saved monthly income & KWSP figures for ${DateUtils.formatMonthKey(income.monthKey)}"))
+        }
+    }
+
+    // --- Payday Intelligence V1 Actions ---
+    fun savePaydayAllocation(allocation: PaydayAllocationEntity) {
+        viewModelScope.launch {
+            repository.savePaydayAllocation(allocation)
+            _eventFlow.emit(
+                UiEvent.ShowSnackbar(
+                    if (allocation.hasOverrides) {
+                        "Approved custom Payday allocation plan for ${DateUtils.formatMonthKey(allocation.monthKey)}"
+                    } else {
+                        "Approved Payday Intelligence plan for ${DateUtils.formatMonthKey(allocation.monthKey)}"
+                    }
+                )
+            )
         }
     }
 

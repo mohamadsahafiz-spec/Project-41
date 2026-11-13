@@ -56,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.BuildConfig
 import com.example.data.model.DebtEntity
 import com.example.data.model.FinancialProfileEntity
 import com.example.ui.theme.SuccessGreen
@@ -74,6 +75,7 @@ fun ProfileSettingsScreen(
     val context = LocalContext.current
     var showExportDialog by remember { mutableStateOf<String?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var showChangelogDialog by remember { mutableStateOf(false) }
 
     var netSalary by remember(profile) { mutableStateOf(profile.netMonthlySalary.toString()) }
     var basicSalary by remember(profile) { mutableStateOf(profile.basicSalary.toString()) }
@@ -514,9 +516,120 @@ fun ProfileSettingsScreen(
             }
         }
 
+        // App Version & Changelog
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("app_version_changelog_card"),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Project 41 • v${BuildConfig.VERSION_NAME}",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            )
+                            Text(
+                                text = "Build ${BuildConfig.VERSION_CODE} • Payday Intelligence V1",
+                                style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { showChangelogDialog = true },
+                            modifier = Modifier.testTag("open_changelog_btn"),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Changelog")
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+    if (showChangelogDialog) {
+        AlertDialog(
+            onDismissRequest = { showChangelogDialog = false },
+            title = { Text("Project 41 Changelog", fontWeight = FontWeight.Bold) },
+            text = {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(260.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item {
+                        Text(
+                            text = "v1.1.0 — Payday Intelligence V1",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• Added Stage 2 Payday Intelligence inside Monthly Check-In before payment confirmation.\n" +
+                                "• Prioritizes essential bills, minimum debts, emergency fund protection, and highest-APR debt payoff.\n" +
+                                "• Excludes reimbursements and unconfirmed income from spendable payday cash.\n" +
+                                "• Supports user allocation overrides stored separately from engine recommendations.\n" +
+                                "• Displays WHY explanations, missing data alerts, and spending consequence warnings.",
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 17.sp)
+                        )
+                    }
+                    item {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "v1.0.1 — Safety & Compact Widget",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• Restored Poka-Yoke confirmation dialog and stage completion guards.\n" +
+                                "• Compact dark home widget with floating QuickExpenseActivity popup.\n" +
+                                "• Corrected HP1/HP2 3% reference handling and KWSP overtime exclusion.",
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 17.sp)
+                        )
+                    }
+                    item {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "v1.0.0 — Initial Project 41 Release",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• UK Personal Finance Flowchart v3.0.10 (Malaysia), Savings Vault, Milestones & JSON Backup.",
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 17.sp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showChangelogDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 
     // Export Dialog

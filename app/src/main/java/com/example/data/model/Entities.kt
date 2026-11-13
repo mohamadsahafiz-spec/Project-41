@@ -126,6 +126,9 @@ data class MonthlyIncomeEntity(
     val incentives: Double = 0.0,
     val thirteenthMonth: Double = 0.0,
     val otherIncome: Double = 0.0,
+    val reimbursements: Double = 0.0,
+    val unconfirmedIncome: Double = 0.0,
+    val isConfirmedReceived: Boolean = true,
     val actualEmployeeKwsp: Double? = null,
     val actualEmployerKwsp: Double? = null,
     val updatedTimestamp: Long = System.currentTimeMillis()
@@ -133,9 +136,52 @@ data class MonthlyIncomeEntity(
     val kwspContributableWages: Double
         get() = grossSalary + incentives + thirteenthMonth
 
+    // Reimbursements and unconfirmed income must NEVER count as spendable take-home income
     val totalTakeHomeIncome: Double
-        get() = netSalary + overtime + incentives + thirteenthMonth + otherIncome
+        get() = if (isConfirmedReceived) {
+            netSalary + overtime + incentives + thirteenthMonth + otherIncome
+        } else {
+            0.0
+        }
 }
+
+/**
+ * Payday Intelligence V1 allocation plan per month.
+ * Persists engine-recommended figures separately from user-approved/overridden figures.
+ */
+@Entity(
+    tableName = "payday_allocations",
+    indices = [Index(value = ["monthKey"], unique = true)]
+)
+data class PaydayAllocationEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val monthKey: String,
+    val confirmedAvailableCash: Double,
+    val reimbursementsExcluded: Double = 0.0,
+    val unconfirmedIncomeExcluded: Double = 0.0,
+    val upcomingEssentialExpensesInput: Double? = null,
+    val emergencyFundTargetInput: Double? = null,
+    val cashBufferTargetInput: Double? = null,
+    // Engine recommendations (immutable snapshot for this plan)
+    val recEssentialCommitments: Double,
+    val recMinDebtPayments: Double,
+    val recUpcomingEssentials: Double,
+    val recExtraDebtRepayment: Double,
+    val recExtraDebtTargetKey: String? = null,
+    val recEmergencySavings: Double,
+    val recDiscretionaryAllowance: Double,
+    val recRemainingBuffer: Double,
+    // User-approved / overridden allocations
+    val approvedExtraDebtRepayment: Double,
+    val approvedEmergencySavings: Double,
+    val approvedDiscretionaryAllowance: Double,
+    val approvedRemainingBuffer: Double,
+    val hasOverrides: Boolean = false,
+    val isApproved: Boolean = false,
+    val approvedTimestamp: Long? = null,
+    val rationaleSummary: String = "",
+    val updatedTimestamp: Long = System.currentTimeMillis()
+)
 
 
 /**

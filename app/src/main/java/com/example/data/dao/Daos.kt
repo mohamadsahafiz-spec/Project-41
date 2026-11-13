@@ -14,6 +14,7 @@ import com.example.data.model.FinancialProfileEntity
 import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyCheckInEntity
 import com.example.data.model.MonthlyIncomeEntity
+import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
 import com.example.data.model.SavingsTransactionEntity
 import kotlinx.coroutines.flow.Flow
@@ -229,4 +230,19 @@ interface FlowchartVerificationDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun setVerification(verification: FlowchartVerificationEntity)
+}
+
+/**
+ * Payday Intelligence V1 Allocation DAO
+ */
+@Dao
+interface PaydayAllocationDao {
+    @Query("SELECT * FROM payday_allocations WHERE monthKey = :monthKey LIMIT 1")
+    fun getAllocationForMonth(monthKey: String): Flow<PaydayAllocationEntity?>
+
+    @Query("SELECT * FROM payday_allocations WHERE monthKey = :monthKey LIMIT 1")
+    suspend fun getAllocationForMonthDirect(monthKey: String): PaydayAllocationEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(allocation: PaydayAllocationEntity)
 }

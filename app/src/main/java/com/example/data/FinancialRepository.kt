@@ -9,6 +9,7 @@ import com.example.data.model.FinancialProfileEntity
 import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyCheckInEntity
 import com.example.data.model.MonthlyIncomeEntity
+import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
 import com.example.data.model.SavingsTransactionEntity
 import com.example.logic.AchievementEngine
@@ -77,6 +78,7 @@ class FinancialRepository(private val context: Context) {
     private val savingsTransactionDao = db.savingsTransactionDao()
     private val monthlyIncomeDao = db.monthlyIncomeDao()
     private val flowchartVerificationDao = db.flowchartVerificationDao()
+    private val paydayAllocationDao = db.paydayAllocationDao()
 
     val profileFlow: Flow<FinancialProfileEntity?> = profileDao.getProfile().distinctUntilChanged()
     val debtsFlow: Flow<List<DebtEntity>> = debtDao.getAllDebts().distinctUntilChanged()
@@ -98,6 +100,10 @@ class FinancialRepository(private val context: Context) {
 
     fun getIncomeForMonth(monthKey: String): Flow<MonthlyIncomeEntity?> {
         return monthlyIncomeDao.getIncomeForMonth(monthKey)
+    }
+
+    fun getPaydayAllocationForMonth(monthKey: String): Flow<PaydayAllocationEntity?> {
+        return paydayAllocationDao.getAllocationForMonth(monthKey).distinctUntilChanged()
     }
 
     fun getCommitmentItemsForMonth(monthKey: String): Flow<List<MonthlyCommitmentItem>> {
@@ -380,7 +386,24 @@ class FinancialRepository(private val context: Context) {
 
     // --- MONTHLY INCOME CHECK-IN ---
     suspend fun saveMonthlyIncome(income: MonthlyIncomeEntity) = withContext(Dispatchers.IO) {
-        monthlyIncomeDao.insertOrUpdate(income)
+        val existing = monthlyIncomeDao.getIncomeForMonthDirect(income.monthKey)
+        monthlyIncomeDao.insertOrUpdate(
+            income.copy(
+                id = existing?.id ?: income.id,
+                updatedTimestamp = System.currentTimeMillis()
+            )
+        )
+    }
+
+    // --- PAYDAY INTELLIGENCE V1 ALLOCATION PLAN ---
+    suspend fun savePaydayAllocation(allocation: PaydayAllocationEntity) = withContext(Dispatchers.IO) {
+        val existing = paydayAllocationDao.getAllocationForMonthDirect(allocation.monthKey)
+        paydayAllocationDao.insertOrUpdate(
+            allocation.copy(
+                id = existing?.id ?: allocation.id,
+                updatedTimestamp = System.currentTimeMillis()
+            )
+        )
     }
 
     // --- FLOWCHART STEP VERIFICATION ---
@@ -433,11 +456,12 @@ class FinancialRepository(private val context: Context) {
 
         val incomeRecord = monthlyIncomeDao.getIncomeForMonthDirect(monthKey)
         val grossSalary = incomeRecord?.grossSalary ?: profile.basicSalary
-        val netSalary = incomeRecord?.netSalary ?: profile.netMonthlySalary
-        val overtime = incomeRecord?.overtime ?: 0.0
-        val incentives = incomeRecord?.incentives ?: 0.0
-        val thirteenthMonth = incomeRecord?.thirteenthMonth ?: 0.0
-        val otherIncome = incomeRecord?.otherIncome ?: 0.0
+        val isConfirmed = incomeRecord?.isConfirmedReceived ?: true
+        val netSalary = if (isConfirmed) (incomeRecord?.netSalary ?: profile.netMonthlySalary) else 0.0
+        val overtime = if (isConfirmed) (incomeRecord?.overtime ?: 0.0) else 0.0
+        val incentives = if (isConfirmed) (incomeRecord?.incentives ?: 0.0) else 0.0
+        val thirteenthMonth = if (isConfirmed) (incomeRecord?.thirteenthMonth ?: 0.0) else 0.0
+        val otherIncome = if (isConfirmed) (incomeRecord?.otherIncome ?: 0.0) else 0.0
         val variableIncome = overtime + incentives + thirteenthMonth + otherIncome
         val totalIncome = netSalary + variableIncome
 
