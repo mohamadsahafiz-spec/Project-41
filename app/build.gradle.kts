@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.freedomtracker.myrpff"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.1.0"
+    versionCode = 4
+    versionName = "1.1.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -63,7 +63,14 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        it.forkEvery = 1
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

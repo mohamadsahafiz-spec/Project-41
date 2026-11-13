@@ -545,7 +545,7 @@ fun ProfileSettingsScreen(
                                 )
                             )
                             Text(
-                                text = "Build ${BuildConfig.VERSION_CODE} • Payday Intelligence V1",
+                                text = "Build ${BuildConfig.VERSION_CODE} • Payday Intelligence V1.1.1",
                                 style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
                             )
                         }
@@ -581,8 +581,40 @@ fun ProfileSettingsScreen(
                 ) {
                     item {
                         Text(
-                            text = "v1.1.0 — Payday Intelligence V1",
+                            text = "v1.1.2 — Payday Intelligence V1.1.1 (Data Integrity Polish)",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• Removed unconditional debt APR resets on database open so manually updated rates survive restarts.\n" +
+                                "• Restores debt APR and high-interest classification metadata cleanly in JSON backups without fabricating missing legacy rates.\n" +
+                                "• Separated exact zero-surplus break-even from genuine cash shortfall in Payday Intelligence explanations and alerts.",
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 17.sp)
+                        )
+                    }
+                    item {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "v1.1.1 — Payday Intelligence V1.1",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• Added explicit cash reconciliation modes distinguishing Current Bank Balance from Monthly Cashflow (prevents double-counting).\n" +
+                                "• Enforced hard allocation caps (eligible debt balances, emergency target gap, minimum cash buffer, and Priority 1 protection) with inline errors.\n" +
+                                "• Added debt-by-debt extra repayment breakdown and persisted target keys/amounts.\n" +
+                                "• Persisted Monthly Check-In Stages 1–6 progress per month in Room v4.\n" +
+                                "• Extended JSON Backup & Restore to include monthly income, Payday allocations, and Check-In progress while staying backward-compatible.",
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 17.sp)
+                        )
+                    }
+                    item {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "v1.1.0 — Payday Intelligence V1",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(

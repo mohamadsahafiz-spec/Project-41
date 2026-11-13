@@ -2,6 +2,20 @@
 
 All notable changes to **Project 41** are documented in this file.
 
+## [1.1.2] - Payday Intelligence V1.1.1 (Data Integrity Polish)
+### Fixed & Improved
+- **Preserved Debt APRs Across Database Reopens**: Removed unconditional `aprPercent` overwrites from `AppDatabase.onOpen()` while keeping initial reference debt rates for fresh database prepopulation.
+- **Complete Debt Metadata Backup & Restore**: Updated `restoreDataFromJson()` to restore debt `aprPercent`, `isHighInterest`, `initialBalance`, `currentBalance`, `monthlyTarget`, and `name`, while remaining compatible with older backups and never fabricating missing rate metadata.
+- **Accurate Zero-Surplus vs Shortfall Classification**: Distinguished exact break-even (`ZERO_SURPLUS`) from genuine negative `SHORTFALL` in `PaydayIntelligenceEngine` and Stage 2 UI so zero surplus blocks extra allocations cleanly without showing a false `Shortfall: RM 0.00` warning.
+
+## [1.1.1] - Payday Intelligence V1.1
+### Fixed & Improved
+- **Cash Reconciliation & Double-Counting Prevention**: Established an explicit single source of truth in Stage 2 (`Opening Bank Cash + Cashflow` vs `Current Bank Balance`) and clearly separated `Current Account Cash` (`bankBalance`) from `Calculated Monthly Cashflow`.
+- **Strict Allocation Validation**: Added hard validation rules rejecting negative, non-numeric, and excessive allocations; caps extra debt repayment at eligible outstanding debt balances, caps emergency savings at the remaining emergency target gap, enforces minimum cash buffer targets, and blocks approving allocations that violate Priority 1 obligations.
+- **Debt-by-Debt Waterfall Breakdown**: Added structured per-debt extra repayment breakdown ranked by highest eligible rate (`SHOPEE_SLOAN` 18% provisional -> `MAYBANK_CC` 15% APR; excluding 3% reference-only HP1/HP2) and persisted target debt keys/amounts cleanly.
+- **Persistent Check-In Stage Progress (`Room v4`)**: Added `monthly_checkin_progress` table and `MIGRATION_3_4` to persist Monthly Check-In Stages 1–6 completion per month accurately across screen/Activity recreation.
+- **Full JSON Backup & Restore (`v3.0`)**: Included `monthly_incomes`, `payday_allocations` (with separate recommended vs approved allocations and debt breakdown), and `monthly_checkin_progress` in JSON export/restore with backward compatibility for older backups.
+
 ## [1.1.0] - Payday Intelligence V1
 ### Added
 - **Payday Intelligence V1 (`Stage 2 — Payday Plan`)**: Integrated an explainable payday allocation step inside the Monthly Check-In workflow, immediately after income entry and before monthly commitment payments.

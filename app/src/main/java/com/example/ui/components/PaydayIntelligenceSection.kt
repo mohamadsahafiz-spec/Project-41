@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +52,8 @@ import com.example.data.MonthlyCommitmentItem
 import com.example.data.model.DebtEntity
 import com.example.data.model.MonthlyIncomeEntity
 import com.example.data.model.PaydayAllocationEntity
+import com.example.logic.CashSourceMode
+import com.example.logic.CashSurplusStatus
 import com.example.logic.DebtRateClassification
 import com.example.logic.PaydayAllocationPlan
 import com.example.logic.PaydayInput
@@ -61,9 +64,10 @@ import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.WarningGold
 import com.example.util.DateUtils
 import java.util.Locale
-import kotlin.math.abs
 
 class PaydayPlanFormState(
+    initialCashSourceMode: CashSourceMode,
+    initialOpeningCash: String,
     initialUpcomingEssentials: String,
     initialEmergencyTarget: String,
     initialCashBuffer: String,
@@ -71,6 +75,8 @@ class PaydayPlanFormState(
     initialEmergencyOverride: String,
     initialDiscretionaryOverride: String
 ) {
+    var cashSourceMode by mutableStateOf(initialCashSourceMode)
+    var openingCashText by mutableStateOf(initialOpeningCash)
     var upcomingEssentialsText by mutableStateOf(initialUpcomingEssentials)
     var emergencyTargetText by mutableStateOf(initialEmergencyTarget)
     var cashBufferText by mutableStateOf(initialCashBuffer)
@@ -91,8 +97,18 @@ fun rememberPaydayPlanState(
     existingEmergencyFund: Double,
     savedAllocation: PaydayAllocationEntity?
 ): Pair<PaydayPlanFormState, PaydayAllocationPlan> {
+    val initialMode = remember(savedAllocation) {
+        runCatching {
+            savedAllocation?.cashSourceMode?.let { CashSourceMode.valueOf(it) }
+        }.getOrNull() ?: CashSourceMode.OPENING_PLUS_CASHFLOW
+    }
+
     val formState = remember(savedAllocation, monthKey) {
         PaydayPlanFormState(
+            initialCashSourceMode = initialMode,
+            initialOpeningCash = savedAllocation?.openingCashInput?.let {
+                String.format(Locale.US, "%.2f", it)
+            } ?: String.format(Locale.US, "%.2f", existingEverydayCash),
             initialUpcomingEssentials = savedAllocation?.upcomingEssentialExpensesInput?.toString() ?: "",
             initialEmergencyTarget = savedAllocation?.emergencyFundTargetInput?.toString()
                 ?: if (existingEmergencyFund < 1000.0) "1000.0" else "10000.0",
@@ -103,6 +119,7 @@ fun rememberPaydayPlanState(
         )
     }
 
+    val openingCashVal = maxOf(0.0, formState.openingCashText.toDoubleOrNull() ?: 0.0)
     val upcomingEssentialsVal = formState.upcomingEssentialsText.toDoubleOrNull()?.takeIf { it >= 0.0 }
     val emergencyTargetVal = formState.emergencyTargetText.toDoubleOrNull()?.takeIf { it >= 0.0 }
     val cashBufferVal = formState.cashBufferText.toDoubleOrNull()?.takeIf { it >= 0.0 }
@@ -112,6 +129,8 @@ fun rememberPaydayPlanState(
         income,
         defaultNetSalary,
         existingEverydayCash,
+        openingCashVal,
+        formState.cashSourceMode,
         commitments,
         debts,
         recordedExpensesThisMonth,
@@ -125,6 +144,8 @@ fun rememberPaydayPlanState(
             income = income,
             defaultNetSalary = defaultNetSalary,
             existingEverydayCash = existingEverydayCash,
+            openingBankBalance = openingCashVal,
+            cashSourceMode = formState.cashSourceMode,
             commitments = commitments,
             debts = debts,
             recordedExpensesThisMonth = recordedExpensesThisMonth,
@@ -139,21 +160,19 @@ fun rememberPaydayPlanState(
         PaydayIntelligenceEngine.calculatePlan(paydayInput)
     }
 
-    // Initialize override fields once per savedAllocation/plan change if empty
-    remember(savedAllocation, plan.recommendedExtraDebtRepayment, plan.recommendedEmergencySavings, plan.recommendedDiscretionaryAllowance) {
-        val initExtra = savedAllocation?.approvedExtraDebtRepayment ?: plan.recommendedExtraDebtRepayment
-        val initEf = savedAllocation?.approvedEmergencySavings ?: plan.recommendedEmergencySavings
-        val initDisc = savedAllocation?.approvedDiscretionaryAllowance ?: plan.recommendedDiscretionaryAllowance
-        if (formState.extraDebtOverrideText.isEmpty()) {
-            formState.extraDebtOverrideText = String.format(Locale.US, "%.2f", initExtra)
+    var overrideDefaultsInitializedFor by remember(savedAllocation, monthKey) { mutableStateOf<Triple<Double, Double, Double>?>(null) }
+    val targetDefaults = Triple(
+        savedAllocation?.approvedExtraDebtRepayment ?: plan.recommendedExtraDebtRepayment,
+        savedAllocation?.approvedEmergencySavings ?: plan.recommendedEmergencySavings,
+        savedAllocation?.approvedDiscretionaryAllowance ?: plan.recommendedDiscretionaryAllowance
+    )
+    if (overrideDefaultsInitializedFor != targetDefaults) {
+        if (overrideDefaultsInitializedFor == null) {
+            formState.extraDebtOverrideText = String.format(Locale.US, "%.2f", targetDefaults.first)
+            formState.emergencyOverrideText = String.format(Locale.US, "%.2f", targetDefaults.second)
+            formState.discretionaryOverrideText = String.format(Locale.US, "%.2f", targetDefaults.third)
         }
-        if (formState.emergencyOverrideText.isEmpty()) {
-            formState.emergencyOverrideText = String.format(Locale.US, "%.2f", initEf)
-        }
-        if (formState.discretionaryOverrideText.isEmpty()) {
-            formState.discretionaryOverrideText = String.format(Locale.US, "%.2f", initDisc)
-        }
-        true
+        overrideDefaultsInitializedFor = targetDefaults
     }
 
     return formState to plan
@@ -167,7 +186,7 @@ fun LazyListScope.paydayIntelligenceStageItems(
     onSaveAndApprovePlan: (PaydayAllocationEntity) -> Unit,
     onBackToIncome: () -> Unit
 ) {
-    // Item 1: Header, Planning Assumptions, Available Cash, Warnings & Data Gaps
+    // Item 1: Header, Cash Reconciliation, Planning Assumptions, Available Cash, Warnings & Data Gaps
     item(key = "payday_header_assumptions") {
         Card(
             modifier = Modifier
@@ -262,6 +281,56 @@ fun LazyListScope.paydayIntelligenceStageItems(
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Cash Reconciliation Mode (Single Source of Truth — Zero Double-Counting)
+                Text(
+                    text = "EVERYDAY CASH SOURCE OF TRUTH",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 10.sp
+                    )
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = formState.cashSourceMode == CashSourceMode.OPENING_PLUS_CASHFLOW,
+                        onClick = { formState.cashSourceMode = CashSourceMode.OPENING_PLUS_CASHFLOW },
+                        label = { Text("Opening + Cashflow", fontSize = 11.sp) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("cash_mode_opening_plus_cashflow")
+                    )
+                    FilterChip(
+                        selected = formState.cashSourceMode == CashSourceMode.CURRENT_BANK_BALANCE,
+                        onClick = { formState.cashSourceMode = CashSourceMode.CURRENT_BANK_BALANCE },
+                        label = { Text("Current Bank Bal", fontSize = 11.sp) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("cash_mode_current_bank")
+                    )
+                }
+
+                if (formState.cashSourceMode == CashSourceMode.OPENING_PLUS_CASHFLOW) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = formState.openingCashText,
+                        onValueChange = { formState.openingCashText = it },
+                        label = { Text("Pre-Payday Opening Bank Cash") },
+                        prefix = { Text("RM ") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("payday_opening_cash_input")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Text(
                     text = "PAYDAY PLANNING ASSUMPTIONS",
                     style = MaterialTheme.typography.labelSmall.copy(
@@ -307,7 +376,7 @@ fun LazyListScope.paydayIntelligenceStageItems(
                     OutlinedTextField(
                         value = formState.cashBufferText,
                         onValueChange = { formState.cashBufferText = it },
-                        label = { Text("Cash Buffer Target") },
+                        label = { Text("Min Cash Buffer") },
                         placeholder = { Text("Auto 10% (<=200)") },
                         prefix = { Text("RM ") },
                         singleLine = true,
@@ -338,6 +407,7 @@ fun LazyListScope.paydayIntelligenceStageItems(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                // Cash Reconciliation Summary Box (Account Cash vs Monthly Cashflow)
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f),
@@ -357,23 +427,43 @@ fun LazyListScope.paydayIntelligenceStageItems(
                                 text = DateUtils.formatCurrency(plan.actualAvailableCash),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = if (plan.hasInsufficientCash) DangerRed else SuccessGreen
+                                    color = when (plan.surplusStatus) {
+                                        CashSurplusStatus.SHORTFALL -> DangerRed
+                                        CashSurplusStatus.ZERO_SURPLUS -> WarningGold
+                                        CashSurplusStatus.POSITIVE_SURPLUS -> SuccessGreen
+                                    }
                                 ),
                                 modifier = Modifier.testTag("payday_available_cash_text")
                             )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Confirmed Income: ${DateUtils.formatCurrency(plan.totalConfirmedIncome)} • Already Paid/Spent: ${DateUtils.formatCurrency(plan.alreadyPaidCommitments + plan.recordedExpensesThisMonth)}",
+                            text = plan.cashReconciliationExplanation,
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Current Account Cash (Bank): ${DateUtils.formatCurrency(plan.currentBankBalance)}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            )
+                            Text(
+                                text = "Monthly Cashflow: ${DateUtils.formatCurrency(plan.calculatedMonthlyCashflow)}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            )
+                        }
                         if (plan.reimbursementsExcluded > 0.0) {
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Reimbursements Excluded: ${DateUtils.formatCurrency(plan.reimbursementsExcluded)} (not counted as income)",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = InfoBlue, fontWeight = FontWeight.Medium)
                             )
                         }
                         if (plan.unconfirmedIncomeExcluded > 0.0) {
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Unconfirmed Income Excluded: ${DateUtils.formatCurrency(plan.unconfirmedIncomeExcluded)} (pending receipt)",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = WarningGold, fontWeight = FontWeight.Medium)
@@ -382,10 +472,12 @@ fun LazyListScope.paydayIntelligenceStageItems(
                     }
                 }
 
-                if (plan.hasInsufficientCash) {
+                if (plan.surplusStatus == CashSurplusStatus.SHORTFALL) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("payday_shortfall_banner"),
                         color = DangerRed.copy(alpha = 0.14f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
@@ -402,6 +494,33 @@ fun LazyListScope.paydayIntelligenceStageItems(
                                 )
                                 Text(
                                     text = "Pause extra debt repayments, savings top-ups, and discretionary spending until mandatory bills and minimum debt payments are covered.",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                                )
+                            }
+                        }
+                    }
+                } else if (plan.surplusStatus == CashSurplusStatus.ZERO_SURPLUS) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("payday_zero_surplus_banner"),
+                        color = WarningGold.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Icon(imageVector = Icons.Default.Info, contentDescription = null, tint = WarningGold, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Exact Break-Even After Obligations (RM 0.00 Surplus)",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = WarningGold)
+                                )
+                                Text(
+                                    text = "Available cash exactly covers Priority 1 obligations with zero extra surplus left for savings top-ups, extra debt payoff, or discretionary spending.",
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
                                 )
                             }
@@ -500,7 +619,7 @@ fun LazyListScope.paydayIntelligenceStageItems(
         }
     }
 
-    // Item 3: Debt Ranking & Consequence of Spending Surplus
+    // Item 3: Debt Ranking & Debt-by-Debt Waterfall Breakdown + Consequence
     item(key = "payday_debt_and_consequence") {
         Card(
             modifier = Modifier
@@ -555,6 +674,46 @@ fun LazyListScope.paydayIntelligenceStageItems(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
+                if (plan.recommendedDebtAllocations.isNotEmpty()) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("payday_debt_breakdown_box"),
+                        color = InfoBlue.copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "RECOMMENDED DEBT-BY-DEBT EXTRA REPAYMENT",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = InfoBlue,
+                                    fontSize = 10.sp
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            plan.recommendedDebtAllocations.forEach { alloc ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "${alloc.debtName} (Bal ${DateUtils.formatCurrency(alloc.outstandingBalance)})",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
+                                    )
+                                    Text(
+                                        text = DateUtils.formatCurrency(alloc.allocatedAmount),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = InfoBlue)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = WarningGold.copy(alpha = 0.14f),
@@ -580,28 +739,21 @@ fun LazyListScope.paydayIntelligenceStageItems(
         }
     }
 
-    // Item 4: User Override Controls & Approval Actions
+    // Item 4: Strict Validated Override Controls & Approval Actions
     item(key = "payday_override_approval") {
-        val approvedExtraDebt = maxOf(0.0, formState.extraDebtOverrideText.toDoubleOrNull() ?: plan.recommendedExtraDebtRepayment)
-        val approvedEmergency = maxOf(0.0, formState.emergencyOverrideText.toDoubleOrNull() ?: plan.recommendedEmergencySavings)
-        val approvedDiscretionary = maxOf(0.0, formState.discretionaryOverrideText.toDoubleOrNull() ?: plan.recommendedDiscretionaryAllowance)
-
-        val totalReservedObligations = plan.essentialCommitmentsReserved +
-            plan.minimumDebtPaymentsReserved +
-            plan.upcomingEssentialExpensesReserved
-        val approvedRemainingBuffer = plan.actualAvailableCash -
-            totalReservedObligations -
-            approvedExtraDebt -
-            approvedEmergency -
-            approvedDiscretionary
-
-        val hasOverrides = abs(approvedExtraDebt - plan.recommendedExtraDebtRepayment) > 0.01 ||
-            abs(approvedEmergency - plan.recommendedEmergencySavings) > 0.01 ||
-            abs(approvedDiscretionary - plan.recommendedDiscretionaryAllowance) > 0.01
+        val validation = PaydayIntelligenceEngine.validateApprovedAllocation(
+            plan = plan,
+            extraDebtRaw = formState.extraDebtOverrideText,
+            emergencyRaw = formState.emergencyOverrideText,
+            discretionaryRaw = formState.discretionaryOverrideText
+        )
 
         val upcomingEssentialsVal = formState.upcomingEssentialsText.toDoubleOrNull()?.takeIf { it >= 0.0 }
         val emergencyTargetVal = formState.emergencyTargetText.toDoubleOrNull()?.takeIf { it >= 0.0 }
         val cashBufferVal = formState.cashBufferText.toDoubleOrNull()?.takeIf { it >= 0.0 }
+
+        val eligibleDebts = plan.rankedDebts.filter { it.isEligibleForExtraRepayment }
+        val referenceOnlyDebts = plan.rankedDebts.filter { it.classification == DebtRateClassification.REFERENCE_ONLY }
 
         Card(
             modifier = Modifier
@@ -629,13 +781,14 @@ fun LazyListScope.paydayIntelligenceStageItems(
                             fontSize = 10.sp
                         )
                     )
-                    if (hasOverrides) {
+                    if (validation.hasOverrides || !validation.isValid) {
                         TextButton(
                             onClick = {
                                 formState.extraDebtOverrideText = String.format(Locale.US, "%.2f", plan.recommendedExtraDebtRepayment)
                                 formState.emergencyOverrideText = String.format(Locale.US, "%.2f", plan.recommendedEmergencySavings)
                                 formState.discretionaryOverrideText = String.format(Locale.US, "%.2f", plan.recommendedDiscretionaryAllowance)
-                            }
+                            },
+                            modifier = Modifier.testTag("reset_payday_overrides_btn")
                         ) {
                             Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -651,8 +804,12 @@ fun LazyListScope.paydayIntelligenceStageItems(
                     onValueChange = { formState.extraDebtOverrideText = it },
                     label = {
                         Text(
-                            "Approved Extra Debt (${plan.recommendedExtraDebtTargetName ?: "None"}) • Rec: ${DateUtils.formatCurrency(plan.recommendedExtraDebtRepayment)}"
+                            "Approved Extra Debt (Max ${DateUtils.formatCurrency(plan.maxEligibleDebtBalance)} • Rec ${DateUtils.formatCurrency(plan.recommendedExtraDebtRepayment)})"
                         )
+                    },
+                    isError = validation.extraDebtError != null,
+                    supportingText = validation.extraDebtError?.let { err ->
+                        { Text(text = err, color = DangerRed, fontSize = 11.sp) }
                     },
                     prefix = { Text("RM ") },
                     singleLine = true,
@@ -661,13 +818,55 @@ fun LazyListScope.paydayIntelligenceStageItems(
                         .fillMaxWidth()
                         .testTag("payday_override_extra_debt")
                 )
+
+                // Live Approved Debt-by-Debt Distribution matching persisted keys/amounts
+                if (validation.extraDebtError == null && validation.approvedDebtAllocations.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("payday_approved_debt_breakdown"),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "APPROVED DEBT-BY-DEBT DISTRIBUTION",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            validation.approvedDebtAllocations.forEach { alloc ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "${alloc.debtName} (${alloc.debtKey})",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
+                                    )
+                                    Text(
+                                        text = DateUtils.formatCurrency(alloc.allocatedAmount),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
 
                 OutlinedTextField(
                     value = formState.emergencyOverrideText,
                     onValueChange = { formState.emergencyOverrideText = it },
                     label = {
-                        Text("Approved Emergency Savings • Rec: ${DateUtils.formatCurrency(plan.recommendedEmergencySavings)}")
+                        Text(
+                            "Approved Emergency Savings (Gap ${DateUtils.formatCurrency(plan.emergencyTargetGap)} • Rec ${DateUtils.formatCurrency(plan.recommendedEmergencySavings)})"
+                        )
+                    },
+                    isError = validation.emergencyError != null,
+                    supportingText = validation.emergencyError?.let { err ->
+                        { Text(text = err, color = DangerRed, fontSize = 11.sp) }
                     },
                     prefix = { Text("RM ") },
                     singleLine = true,
@@ -684,6 +883,10 @@ fun LazyListScope.paydayIntelligenceStageItems(
                     label = {
                         Text("Approved Discretionary Allowance • Rec: ${DateUtils.formatCurrency(plan.recommendedDiscretionaryAllowance)}")
                     },
+                    isError = validation.discretionaryError != null,
+                    supportingText = validation.discretionaryError?.let { err ->
+                        { Text(text = err, color = DangerRed, fontSize = 11.sp) }
+                    },
                     prefix = { Text("RM ") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -692,11 +895,34 @@ fun LazyListScope.paydayIntelligenceStageItems(
                         .testTag("payday_override_discretionary")
                 )
 
+                if (validation.generalError != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("payday_validation_error_banner"),
+                        color = DangerRed.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = validation.generalError,
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = DangerRed, fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = if (approvedRemainingBuffer < -0.01) DangerRed.copy(alpha = 0.14f) else SuccessGreen.copy(alpha = 0.12f),
+                    color = if (!validation.isValid) DangerRed.copy(alpha = 0.14f) else SuccessGreen.copy(alpha = 0.12f),
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Row(
@@ -708,23 +934,30 @@ fun LazyListScope.paydayIntelligenceStageItems(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (approvedRemainingBuffer < -0.01) "Over-Allocated Buffer Deficit:" else "Approved Remaining Cash Buffer:",
+                                text = if (validation.remainingBuffer < -0.01) "Over-Allocated Buffer Deficit:" else "Approved Remaining Cash Buffer:",
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
-                                text = if (hasOverrides) {
-                                    "Recommended Buffer: ${DateUtils.formatCurrency(plan.recommendedRemainingBuffer)} (Custom overrides active)"
-                                } else {
-                                    "Matches engine recommendation"
+                                text = buildString {
+                                    if (plan.configuredCashBufferTarget != null) {
+                                        append("Min Required: ${DateUtils.formatCurrency(plan.requiredMinCashBuffer)} • ")
+                                    }
+                                    append(
+                                        if (validation.hasOverrides) {
+                                            "Rec Buffer: ${DateUtils.formatCurrency(plan.recommendedRemainingBuffer)}"
+                                        } else {
+                                            "Matches engine recommendation"
+                                        }
+                                    )
                                 },
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             )
                         }
                         Text(
-                            text = DateUtils.formatCurrency(approvedRemainingBuffer),
+                            text = DateUtils.formatCurrency(validation.remainingBuffer),
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = if (approvedRemainingBuffer < -0.01) DangerRed else SuccessGreen
+                                color = if (!validation.isValid) DangerRed else SuccessGreen
                             )
                         )
                     }
@@ -748,37 +981,60 @@ fun LazyListScope.paydayIntelligenceStageItems(
 
                     Button(
                         onClick = {
+                            if (!validation.isValid) return@Button
                             val now = System.currentTimeMillis()
+                            val recDebtJson = PaydayIntelligenceEngine.serializeDebtAllocations(plan.recommendedDebtAllocations)
+                            val approvedDebtJson = PaydayIntelligenceEngine.serializeDebtAllocations(validation.approvedDebtAllocations)
+                            val synchronizedDebtExplanation = PaydayIntelligenceEngine.formatDebtBreakdownExplanation(
+                                allocations = validation.approvedDebtAllocations,
+                                eligibleDebts = eligibleDebts,
+                                referenceOnlyDebts = referenceOnlyDebts,
+                                hasInsufficientCash = plan.hasInsufficientCash,
+                                shortfallAmount = plan.shortfallAmount,
+                                surplusStatus = plan.surplusStatus
+                            )
+                            val rationale = if (validation.hasOverrides) {
+                                "Approved custom plan: $synchronizedDebtExplanation ${plan.spendingConsequenceSummary}"
+                            } else {
+                                plan.spendingConsequenceSummary
+                            }
+
                             val entity = PaydayAllocationEntity(
                                 id = savedAllocation?.id ?: 0L,
                                 monthKey = monthKey,
+                                cashSourceMode = plan.cashSourceMode.name,
+                                openingCashInput = plan.openingBankBalanceUsed,
                                 confirmedAvailableCash = plan.actualAvailableCash,
+                                calculatedMonthlyCashflow = plan.calculatedMonthlyCashflow,
                                 reimbursementsExcluded = plan.reimbursementsExcluded,
                                 unconfirmedIncomeExcluded = plan.unconfirmedIncomeExcluded,
                                 upcomingEssentialExpensesInput = upcomingEssentialsVal,
                                 emergencyFundTargetInput = emergencyTargetVal,
                                 cashBufferTargetInput = cashBufferVal,
+                                minCashBufferEnforced = plan.requiredMinCashBuffer,
                                 recEssentialCommitments = plan.essentialCommitmentsReserved,
                                 recMinDebtPayments = plan.minimumDebtPaymentsReserved,
                                 recUpcomingEssentials = plan.upcomingEssentialExpensesReserved,
                                 recExtraDebtRepayment = plan.recommendedExtraDebtRepayment,
                                 recExtraDebtTargetKey = plan.recommendedExtraDebtTargetKey,
+                                recDebtAllocationsJson = recDebtJson,
                                 recEmergencySavings = plan.recommendedEmergencySavings,
                                 recDiscretionaryAllowance = plan.recommendedDiscretionaryAllowance,
                                 recRemainingBuffer = plan.recommendedRemainingBuffer,
-                                approvedExtraDebtRepayment = approvedExtraDebt,
-                                approvedEmergencySavings = approvedEmergency,
-                                approvedDiscretionaryAllowance = approvedDiscretionary,
-                                approvedRemainingBuffer = approvedRemainingBuffer,
-                                hasOverrides = hasOverrides,
+                                approvedExtraDebtRepayment = validation.parsedExtraDebt,
+                                approvedDebtAllocationsJson = approvedDebtJson,
+                                approvedEmergencySavings = validation.parsedEmergency,
+                                approvedDiscretionaryAllowance = validation.parsedDiscretionary,
+                                approvedRemainingBuffer = validation.remainingBuffer,
+                                hasOverrides = validation.hasOverrides,
                                 isApproved = true,
                                 approvedTimestamp = now,
-                                rationaleSummary = plan.spendingConsequenceSummary,
+                                rationaleSummary = rationale,
                                 updatedTimestamp = now
                             )
                             onSaveAndApprovePlan(entity)
                         },
-                        enabled = approvedRemainingBuffer >= -0.01,
+                        enabled = validation.isValid,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier
                             .weight(2f)
@@ -787,7 +1043,7 @@ fun LazyListScope.paydayIntelligenceStageItems(
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            text = if (hasOverrides) "Approve Custom Plan" else "Approve & Continue",
+                            text = if (validation.hasOverrides) "Approve Custom Plan" else "Approve & Continue",
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.width(6.dp))

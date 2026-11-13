@@ -13,6 +13,7 @@ import com.example.data.dao.ExpenseDao
 import com.example.data.dao.FinancialProfileDao
 import com.example.data.dao.FlowchartVerificationDao
 import com.example.data.dao.MonthlyCheckInDao
+import com.example.data.dao.MonthlyCheckInProgressDao
 import com.example.data.dao.MonthlyIncomeDao
 import com.example.data.dao.PaydayAllocationDao
 import com.example.data.dao.SavingsAccountDao
@@ -24,6 +25,7 @@ import com.example.data.model.ExpenseEntity
 import com.example.data.model.FinancialProfileEntity
 import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyCheckInEntity
+import com.example.data.model.MonthlyCheckInProgressEntity
 import com.example.data.model.MonthlyIncomeEntity
 import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
@@ -41,9 +43,10 @@ import com.example.data.model.SavingsTransactionEntity
         SavingsTransactionEntity::class,
         MonthlyIncomeEntity::class,
         FlowchartVerificationEntity::class,
-        PaydayAllocationEntity::class
+        PaydayAllocationEntity::class,
+        MonthlyCheckInProgressEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -58,6 +61,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun monthlyIncomeDao(): MonthlyIncomeDao
     abstract fun flowchartVerificationDao(): FlowchartVerificationDao
     abstract fun paydayAllocationDao(): PaydayAllocationDao
+    abstract fun monthlyCheckInProgressDao(): MonthlyCheckInProgressDao
 
     companion object {
         @Volatile
@@ -106,6 +110,31 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE payday_allocations ADD COLUMN cashSourceMode TEXT NOT NULL DEFAULT 'OPENING_PLUS_CASHFLOW'")
+                db.execSQL("ALTER TABLE payday_allocations ADD COLUMN openingCashInput REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE payday_allocations ADD COLUMN calculatedMonthlyCashflow REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE payday_allocations ADD COLUMN minCashBufferEnforced REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE payday_allocations ADD COLUMN recDebtAllocationsJson TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE payday_allocations ADD COLUMN approvedDebtAllocationsJson TEXT NOT NULL DEFAULT '[]'")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `monthly_checkin_progress` (
+                        `monthKey` TEXT NOT NULL,
+                        `stage3Reviewed` INTEGER NOT NULL,
+                        `stage4Confirmed` INTEGER NOT NULL,
+                        `stage5Reviewed` INTEGER NOT NULL,
+                        `stage6Completed` INTEGER NOT NULL,
+                        `updatedTimestamp` INTEGER NOT NULL,
+                        PRIMARY KEY(`monthKey`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -113,7 +142,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "freedom_tracker_db" // Preserving database name to preserve existing data
                 )
-                    .addMigrations(MIGRATION_2_3)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                     .addCallback(DatabasePrepopulateCallback())
                     .fallbackToDestructiveMigration()
                     .build()
@@ -121,6 +150,8 @@ abstract class AppDatabase : RoomDatabase() {
                 instance
             }
         }
+
+        internal fun prepopulateCallback(): Callback = DatabasePrepopulateCallback()
     }
 
     private class DatabasePrepopulateCallback : Callback() {
@@ -209,15 +240,6 @@ abstract class AppDatabase : RoomDatabase() {
                 } finally {
                     db.endTransaction()
                 }
-            }
-
-            override fun onOpen(db: SupportSQLiteDatabase) {
-                super.onOpen(db)
-                // Ensure corrected rates and configurations apply on existing databases
-                db.execSQL("UPDATE debts SET aprPercent = 15.0 WHERE `key` = 'MAYBANK_CC'")
-                db.execSQL("UPDATE debts SET aprPercent = 18.0 WHERE `key` = 'SHOPEE_SLOAN'")
-                db.execSQL("UPDATE debts SET aprPercent = 3.0 WHERE `key` = 'HL_HP1'")
-                db.execSQL("UPDATE debts SET aprPercent = 3.0 WHERE `key` = 'AMBANK_HP2'")
             }
         }
     }

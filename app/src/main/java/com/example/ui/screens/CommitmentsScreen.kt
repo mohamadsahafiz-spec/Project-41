@@ -63,11 +63,13 @@ import com.example.data.MonthlyCommitmentItem
 import com.example.data.MonthlySummaryData
 import com.example.data.model.DebtEntity
 import com.example.data.model.FinancialProfileEntity
+import com.example.data.model.MonthlyCheckInProgressEntity
 import com.example.data.model.MonthlyIncomeEntity
 import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
 import com.example.logic.FlowchartJourneyState
 import com.example.logic.KwspCalculator
+import com.example.logic.PaydayIntelligenceEngine
 import com.example.ui.components.paydayIntelligenceStageItems
 import com.example.ui.components.rememberPaydayPlanState
 import com.example.ui.theme.DangerRed
@@ -94,6 +96,8 @@ fun CommitmentsScreen(
     debts: List<DebtEntity> = emptyList(),
     currentPaydayAllocation: PaydayAllocationEntity? = null,
     onSavePaydayAllocation: ((PaydayAllocationEntity) -> Unit)? = null,
+    checkInProgress: MonthlyCheckInProgressEntity? = null,
+    onSaveCheckInProgress: ((MonthlyCheckInProgressEntity) -> Unit)? = null,
     onDepositToSavings: ((accountId: Long, amount: Double, fromEverydayCash: Boolean, note: String) -> Unit)? = null,
     onWithdrawFromSavings: ((accountId: Long, amount: Double, toEverydayCash: Boolean, note: String) -> Unit)? = null,
     onCreditInterestToSavings: ((accountId: Long, amount: Double, note: String) -> Unit)? = null,
@@ -102,13 +106,32 @@ fun CommitmentsScreen(
     // Current Active Stage (1 to 6)
     var currentStage by remember { mutableStateOf(1) }
 
+    // Persistent Check-In Stage progress per month (reconstructed from Room records)
+    var localProgress by remember(checkInProgress, monthKey) {
+        mutableStateOf(checkInProgress ?: MonthlyCheckInProgressEntity(monthKey = monthKey))
+    }
+    val updateProgress: ((MonthlyCheckInProgressEntity) -> MonthlyCheckInProgressEntity) -> Unit = { transform ->
+        val next = transform(localProgress).copy(
+            monthKey = monthKey,
+            updatedTimestamp = System.currentTimeMillis()
+        )
+        localProgress = next
+        onSaveCheckInProgress?.invoke(next)
+    }
+
     // Explicit completion flags — opening a stage NEVER automatically marks it complete
-    var isStage1Complete by remember(currentIncome) { mutableStateOf(currentIncome != null) }
-    var isStage2Complete by remember(currentPaydayAllocation) { mutableStateOf(currentPaydayAllocation?.isApproved == true) }
-    var isStage3Complete by remember { mutableStateOf(false) }
-    var isStage4Complete by remember { mutableStateOf(false) }
-    var isStage5Complete by remember { mutableStateOf(false) }
-    var isStage6Complete by remember { mutableStateOf(false) }
+    val hasPaidCommitments = items.any { it.isPaid }
+    val isStage1Complete = currentIncome != null
+    val isStage2Complete = currentPaydayAllocation?.isApproved == true
+    val isStage3Complete = localProgress.stage3Reviewed || hasPaidCommitments
+    val isStage4Complete = localProgress.stage4Confirmed || hasPaidCommitments
+    val isStage5Complete = localProgress.stage5Reviewed
+    val isStage6Complete = localProgress.stage6Completed &&
+        isStage1Complete &&
+        isStage2Complete &&
+        isStage3Complete &&
+        isStage4Complete &&
+        isStage5Complete
 
     var updateDefaultItem by remember { mutableStateOf<MonthlyCommitmentItem?>(null) }
     var selectedAccountForDeposit by remember { mutableStateOf<SavingsAccountEntity?>(null) }
@@ -193,7 +216,8 @@ fun CommitmentsScreen(
         unconfirmedIncome = unconfirmedIncomeVal,
         isConfirmedReceived = isIncomeConfirmed,
         actualEmployeeKwsp = actualEmployeeKwspText.toDoubleOrNull(),
-        actualEmployerKwsp = actualEmployerKwspText.toDoubleOrNull()
+        actualEmployerKwsp = actualEmployerKwspText.toDoubleOrNull(),
+        updatedTimestamp = 0L
     )
 
     val (paydayFormState, paydayPlan) = rememberPaydayPlanState(
@@ -603,7 +627,6 @@ fun CommitmentsScreen(
                                     actualEmployerKwsp = actualEmployerKwspText.toDoubleOrNull()
                                 )
                                 onSaveIncome(income)
-                                isStage1Complete = true
                                 currentStage = 2
                             },
                             modifier = Modifier
@@ -622,7 +645,7 @@ fun CommitmentsScreen(
         }
 
         // =========================================================================
-        // STAGE 2 — PAYDAY INTELLIGENCE V1
+        // STAGE 2 — PAYDAY INTELLIGENCE V1/V1.1
         // =========================================================================
         if (currentStage == 2) {
             paydayIntelligenceStageItems(
@@ -632,7 +655,6 @@ fun CommitmentsScreen(
                 savedAllocation = currentPaydayAllocation,
                 onSaveAndApprovePlan = { allocation ->
                     onSavePaydayAllocation?.invoke(allocation)
-                    isStage2Complete = true
                     currentStage = 3
                 },
                 onBackToIncome = { currentStage = 1 }
@@ -814,10 +836,12 @@ fun CommitmentsScreen(
 
                     Button(
                         onClick = {
-                            isStage3Complete = true
+                            updateProgress { it.copy(stage3Reviewed = true) }
                             currentStage = 4
                         },
-                        modifier = Modifier.weight(2f),
+                        modifier = Modifier
+                            .weight(2f)
+                            .testTag("stage3_continue_btn"),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Continue to Stage 4 (${selectedPayments.size} selected)")
@@ -907,10 +931,12 @@ fun CommitmentsScreen(
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Button(
                                         onClick = {
-                                            isStage4Complete = true
+                                            updateProgress { it.copy(stage4Confirmed = true) }
                                             currentStage = 5
                                         },
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("stage4_confirm_no_payments_btn"),
                                         shape = RoundedCornerShape(10.dp)
                                     ) {
                                         Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1141,12 +1167,13 @@ fun CommitmentsScreen(
                         // Stage 5 Explicit Decision Actions: User must explicitly complete savings review
                         Button(
                             onClick = {
-                                isStage5Complete = true
+                                updateProgress { it.copy(stage5Reviewed = true) }
                                 currentStage = 6
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp),
+                                .height(46.dp)
+                                .testTag("stage5_confirm_savings_btn"),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1158,10 +1185,12 @@ fun CommitmentsScreen(
 
                         OutlinedButton(
                             onClick = {
-                                isStage5Complete = true
+                                updateProgress { it.copy(stage5Reviewed = true) }
                                 currentStage = 6
                             },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("stage5_no_savings_btn"),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Text("Confirm No Savings Transactions This Month")
@@ -1304,6 +1333,22 @@ fun CommitmentsScreen(
                                         Text("Extra Debt (Rec ${DateUtils.formatCurrency(currentPaydayAllocation.recExtraDebtRepayment)}):", style = MaterialTheme.typography.bodySmall)
                                         Text(DateUtils.formatCurrency(currentPaydayAllocation.approvedExtraDebtRepayment), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
                                     }
+                                    val approvedTargets = PaydayIntelligenceEngine.deserializeDebtAllocations(
+                                        currentPaydayAllocation.approvedDebtAllocationsJson
+                                    )
+                                    if (approvedTargets.isNotEmpty()) {
+                                        approvedTargets.forEach { target ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(start = 10.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text("↳ ${target.debtName}:", style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant))
+                                                Text(DateUtils.formatCurrency(target.allocatedAmount), style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold))
+                                            }
+                                        }
+                                    }
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text("Emergency Savings (Rec ${DateUtils.formatCurrency(currentPaydayAllocation.recEmergencySavings)}):", style = MaterialTheme.typography.bodySmall)
                                         Text(DateUtils.formatCurrency(currentPaydayAllocation.approvedEmergencySavings), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
@@ -1434,11 +1479,12 @@ fun CommitmentsScreen(
                             // All prior stages completed; user can now explicitly complete Stage 6
                             Button(
                                 onClick = {
-                                    isStage6Complete = true
+                                    updateProgress { it.copy(stage6Completed = true) }
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(50.dp),
+                                    .height(50.dp)
+                                    .testTag("stage6_complete_btn"),
                                 colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
@@ -1600,7 +1646,7 @@ fun CommitmentsScreen(
                             isConfirmingPayments = true
                             onConfirmBatchPayments(selectedItemsList)
                             selectedPayments.clear()
-                            isStage4Complete = true
+                            updateProgress { it.copy(stage3Reviewed = true, stage4Confirmed = true) }
                             showBatchConfirmDialog = false
                             isConfirmingPayments = false
                             currentStage = 5

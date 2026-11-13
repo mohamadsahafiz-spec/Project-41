@@ -13,6 +13,7 @@ import com.example.data.model.ExpenseEntity
 import com.example.data.model.FinancialProfileEntity
 import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyCheckInEntity
+import com.example.data.model.MonthlyCheckInProgressEntity
 import com.example.data.model.MonthlyIncomeEntity
 import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
@@ -213,6 +214,9 @@ interface MonthlyIncomeDao {
     @Query("SELECT * FROM monthly_incomes WHERE monthKey = :monthKey LIMIT 1")
     suspend fun getIncomeForMonthDirect(monthKey: String): MonthlyIncomeEntity?
 
+    @Query("SELECT * FROM monthly_incomes ORDER BY monthKey ASC")
+    suspend fun getAllIncomesDirect(): List<MonthlyIncomeEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(income: MonthlyIncomeEntity)
 }
@@ -233,7 +237,7 @@ interface FlowchartVerificationDao {
 }
 
 /**
- * Payday Intelligence V1 Allocation DAO
+ * Payday Intelligence V1/V1.1 Allocation DAO
  */
 @Dao
 interface PaydayAllocationDao {
@@ -243,6 +247,27 @@ interface PaydayAllocationDao {
     @Query("SELECT * FROM payday_allocations WHERE monthKey = :monthKey LIMIT 1")
     suspend fun getAllocationForMonthDirect(monthKey: String): PaydayAllocationEntity?
 
+    @Query("SELECT * FROM payday_allocations ORDER BY monthKey ASC")
+    suspend fun getAllAllocationsDirect(): List<PaydayAllocationEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(allocation: PaydayAllocationEntity)
+}
+
+/**
+ * Persistent Monthly Check-In Stage Completion DAO
+ */
+@Dao
+interface MonthlyCheckInProgressDao {
+    @Query("SELECT * FROM monthly_checkin_progress WHERE monthKey = :monthKey LIMIT 1")
+    fun getProgressForMonth(monthKey: String): Flow<MonthlyCheckInProgressEntity?>
+
+    @Query("SELECT * FROM monthly_checkin_progress WHERE monthKey = :monthKey LIMIT 1")
+    suspend fun getProgressForMonthDirect(monthKey: String): MonthlyCheckInProgressEntity?
+
+    @Query("SELECT * FROM monthly_checkin_progress ORDER BY monthKey ASC")
+    suspend fun getAllProgressDirect(): List<MonthlyCheckInProgressEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(progress: MonthlyCheckInProgressEntity)
 }

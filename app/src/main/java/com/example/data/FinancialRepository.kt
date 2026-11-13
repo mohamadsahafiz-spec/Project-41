@@ -8,6 +8,7 @@ import com.example.data.model.ExpenseEntity
 import com.example.data.model.FinancialProfileEntity
 import com.example.data.model.FlowchartVerificationEntity
 import com.example.data.model.MonthlyCheckInEntity
+import com.example.data.model.MonthlyCheckInProgressEntity
 import com.example.data.model.MonthlyIncomeEntity
 import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
@@ -66,8 +67,11 @@ data class MonthlySummaryData(
     val kwspBreakdown: KwspContributionBreakdown
 )
 
-class FinancialRepository(private val context: Context) {
-    private val db = AppDatabase.getDatabase(context)
+class FinancialRepository(
+    private val context: Context,
+    dbOverride: AppDatabase? = null
+) {
+    private val db = dbOverride ?: AppDatabase.getDatabase(context)
     private val expenseDao = db.expenseDao()
     private val commitmentDao = db.commitmentDao()
     private val monthlyCheckInDao = db.monthlyCheckInDao()
@@ -79,6 +83,7 @@ class FinancialRepository(private val context: Context) {
     private val monthlyIncomeDao = db.monthlyIncomeDao()
     private val flowchartVerificationDao = db.flowchartVerificationDao()
     private val paydayAllocationDao = db.paydayAllocationDao()
+    private val monthlyCheckInProgressDao = db.monthlyCheckInProgressDao()
 
     val profileFlow: Flow<FinancialProfileEntity?> = profileDao.getProfile().distinctUntilChanged()
     val debtsFlow: Flow<List<DebtEntity>> = debtDao.getAllDebts().distinctUntilChanged()
@@ -104,6 +109,10 @@ class FinancialRepository(private val context: Context) {
 
     fun getPaydayAllocationForMonth(monthKey: String): Flow<PaydayAllocationEntity?> {
         return paydayAllocationDao.getAllocationForMonth(monthKey).distinctUntilChanged()
+    }
+
+    fun getCheckInProgressForMonth(monthKey: String): Flow<MonthlyCheckInProgressEntity?> {
+        return monthlyCheckInProgressDao.getProgressForMonth(monthKey).distinctUntilChanged()
     }
 
     fun getCommitmentItemsForMonth(monthKey: String): Flow<List<MonthlyCommitmentItem>> {
@@ -229,6 +238,15 @@ class FinancialRepository(private val context: Context) {
                 // Note: For vehicle hire purchase (HP1 & HP2), principal is NOT reduced directly by payment instalment.
             }
         }
+        val existingProgress = monthlyCheckInProgressDao.getProgressForMonthDirect(monthKey)
+            ?: MonthlyCheckInProgressEntity(monthKey = monthKey)
+        monthlyCheckInProgressDao.insertOrUpdate(
+            existingProgress.copy(
+                stage3Reviewed = true,
+                stage4Confirmed = true,
+                updatedTimestamp = now
+            )
+        )
         triggerAchievementEvaluation()
     }
 
@@ -395,7 +413,7 @@ class FinancialRepository(private val context: Context) {
         )
     }
 
-    // --- PAYDAY INTELLIGENCE V1 ALLOCATION PLAN ---
+    // --- PAYDAY INTELLIGENCE V1/V1.1 ALLOCATION PLAN ---
     suspend fun savePaydayAllocation(allocation: PaydayAllocationEntity) = withContext(Dispatchers.IO) {
         val existing = paydayAllocationDao.getAllocationForMonthDirect(allocation.monthKey)
         paydayAllocationDao.insertOrUpdate(
@@ -403,6 +421,13 @@ class FinancialRepository(private val context: Context) {
                 id = existing?.id ?: allocation.id,
                 updatedTimestamp = System.currentTimeMillis()
             )
+        )
+    }
+
+    // --- PERSISTENT MONTHLY CHECK-IN STAGE PROGRESS ---
+    suspend fun saveCheckInProgress(progress: MonthlyCheckInProgressEntity) = withContext(Dispatchers.IO) {
+        monthlyCheckInProgressDao.insertOrUpdate(
+            progress.copy(updatedTimestamp = System.currentTimeMillis())
         )
     }
 
@@ -531,6 +556,9 @@ class FinancialRepository(private val context: Context) {
         val debts = debtDao.getAllDebtsDirect()
         val commitments = commitmentDao.getAllCommitmentsDirect()
         val savings = savingsAccountDao.getAllAccountsDirect()
+        val incomes = monthlyIncomeDao.getAllIncomesDirect()
+        val paydayAllocations = paydayAllocationDao.getAllAllocationsDirect()
+        val checkInProgressList = monthlyCheckInProgressDao.getAllProgressDirect()
 
         val profileObj = JSONObject().apply {
             put("netMonthlySalary", profile.netMonthlySalary)
@@ -589,8 +617,81 @@ class FinancialRepository(private val context: Context) {
         }
         root.put("savings_accounts", savingsArray)
 
+        val incomesArray = JSONArray()
+        incomes.forEach { inc ->
+            val obj = JSONObject().apply {
+                put("monthKey", inc.monthKey)
+                put("grossSalary", inc.grossSalary)
+                put("netSalary", inc.netSalary)
+                put("overtime", inc.overtime)
+                put("incentives", inc.incentives)
+                put("thirteenthMonth", inc.thirteenthMonth)
+                put("otherIncome", inc.otherIncome)
+                put("reimbursements", inc.reimbursements)
+                put("unconfirmedIncome", inc.unconfirmedIncome)
+                put("isConfirmedReceived", inc.isConfirmedReceived)
+                put("actualEmployeeKwsp", inc.actualEmployeeKwsp ?: JSONObject.NULL)
+                put("actualEmployerKwsp", inc.actualEmployerKwsp ?: JSONObject.NULL)
+                put("updatedTimestamp", inc.updatedTimestamp)
+            }
+            incomesArray.put(obj)
+        }
+        root.put("monthly_incomes", incomesArray)
+
+        val allocationsArray = JSONArray()
+        paydayAllocations.forEach { alloc ->
+            val obj = JSONObject().apply {
+                put("monthKey", alloc.monthKey)
+                put("cashSourceMode", alloc.cashSourceMode)
+                put("openingCashInput", alloc.openingCashInput)
+                put("confirmedAvailableCash", alloc.confirmedAvailableCash)
+                put("calculatedMonthlyCashflow", alloc.calculatedMonthlyCashflow)
+                put("reimbursementsExcluded", alloc.reimbursementsExcluded)
+                put("unconfirmedIncomeExcluded", alloc.unconfirmedIncomeExcluded)
+                put("upcomingEssentialExpensesInput", alloc.upcomingEssentialExpensesInput ?: JSONObject.NULL)
+                put("emergencyFundTargetInput", alloc.emergencyFundTargetInput ?: JSONObject.NULL)
+                put("cashBufferTargetInput", alloc.cashBufferTargetInput ?: JSONObject.NULL)
+                put("minCashBufferEnforced", alloc.minCashBufferEnforced)
+                put("recEssentialCommitments", alloc.recEssentialCommitments)
+                put("recMinDebtPayments", alloc.recMinDebtPayments)
+                put("recUpcomingEssentials", alloc.recUpcomingEssentials)
+                put("recExtraDebtRepayment", alloc.recExtraDebtRepayment)
+                put("recExtraDebtTargetKey", alloc.recExtraDebtTargetKey ?: JSONObject.NULL)
+                put("recDebtAllocationsJson", alloc.recDebtAllocationsJson)
+                put("recEmergencySavings", alloc.recEmergencySavings)
+                put("recDiscretionaryAllowance", alloc.recDiscretionaryAllowance)
+                put("recRemainingBuffer", alloc.recRemainingBuffer)
+                put("approvedExtraDebtRepayment", alloc.approvedExtraDebtRepayment)
+                put("approvedDebtAllocationsJson", alloc.approvedDebtAllocationsJson)
+                put("approvedEmergencySavings", alloc.approvedEmergencySavings)
+                put("approvedDiscretionaryAllowance", alloc.approvedDiscretionaryAllowance)
+                put("approvedRemainingBuffer", alloc.approvedRemainingBuffer)
+                put("hasOverrides", alloc.hasOverrides)
+                put("isApproved", alloc.isApproved)
+                put("approvedTimestamp", alloc.approvedTimestamp ?: JSONObject.NULL)
+                put("rationaleSummary", alloc.rationaleSummary)
+                put("updatedTimestamp", alloc.updatedTimestamp)
+            }
+            allocationsArray.put(obj)
+        }
+        root.put("payday_allocations", allocationsArray)
+
+        val progressArray = JSONArray()
+        checkInProgressList.forEach { prog ->
+            val obj = JSONObject().apply {
+                put("monthKey", prog.monthKey)
+                put("stage3Reviewed", prog.stage3Reviewed)
+                put("stage4Confirmed", prog.stage4Confirmed)
+                put("stage5Reviewed", prog.stage5Reviewed)
+                put("stage6Completed", prog.stage6Completed)
+                put("updatedTimestamp", prog.updatedTimestamp)
+            }
+            progressArray.put(obj)
+        }
+        root.put("monthly_checkin_progress", progressArray)
+
         root.put("appName", "Project 41")
-        root.put("version", "2.0")
+        root.put("version", "3.0")
         root.put("exportedAt", System.currentTimeMillis())
         root.toString(2)
     }
@@ -621,10 +722,44 @@ class FinancialRepository(private val context: Context) {
             if (root.has("debts")) {
                 val debtsArray = root.getJSONArray("debts")
                 for (i in 0 until debtsArray.length()) {
-                    val d = debtsArray.getJSONObject(i)
-                    val key = d.getString("key")
-                    val cur = d.optDouble("currentBalance", 0.0)
-                    debtDao.setDebtBalance(key, cur)
+                    val d = debtsArray.optJSONObject(i) ?: continue
+                    val key = d.optString("key", "")
+                    if (key.isBlank()) continue
+                    val existing = debtDao.getDebtByKey(key)
+                    val curBalance = optNullableDouble(d, "currentBalance")
+                    val initBalance = optNullableDouble(d, "initialBalance")
+                    val monthlyTarget = optNullableDouble(d, "monthlyTarget")
+                    val name = optNullableString(d, "name")
+                    val aprPercent = optNullableDouble(d, "aprPercent")
+                    val isHighInterest = optNullableBoolean(d, "isHighInterest")
+
+                    if (existing != null) {
+                        debtDao.update(
+                            existing.copy(
+                                name = name ?: existing.name,
+                                initialBalance = initBalance ?: existing.initialBalance,
+                                currentBalance = curBalance ?: existing.currentBalance,
+                                monthlyTarget = monthlyTarget ?: existing.monthlyTarget,
+                                aprPercent = aprPercent ?: existing.aprPercent,
+                                isHighInterest = isHighInterest ?: existing.isHighInterest
+                            )
+                        )
+                    } else {
+                        val resolvedCur = curBalance ?: 0.0
+                        debtDao.insertAll(
+                            listOf(
+                                DebtEntity(
+                                    key = key,
+                                    name = name ?: key,
+                                    initialBalance = initBalance ?: resolvedCur,
+                                    currentBalance = resolvedCur,
+                                    monthlyTarget = monthlyTarget ?: 0.0,
+                                    aprPercent = aprPercent ?: 0.0,
+                                    isHighInterest = isHighInterest ?: false
+                                )
+                            )
+                        )
+                    }
                 }
             }
 
@@ -638,13 +773,136 @@ class FinancialRepository(private val context: Context) {
                 }
             }
 
+            // V1.1 additions (strictly optional for backward compatibility with older JSON backups)
+            val incomesArray = root.optJSONArray("monthly_incomes")
+            if (incomesArray != null) {
+                for (i in 0 until incomesArray.length()) {
+                    val obj = incomesArray.optJSONObject(i) ?: continue
+                    val monthKey = obj.optString("monthKey", "")
+                    if (monthKey.isBlank()) continue
+                    val existing = monthlyIncomeDao.getIncomeForMonthDirect(monthKey)
+                    monthlyIncomeDao.insertOrUpdate(
+                        MonthlyIncomeEntity(
+                            id = existing?.id ?: 0L,
+                            monthKey = monthKey,
+                            grossSalary = obj.optDouble("grossSalary", 4158.00),
+                            netSalary = obj.optDouble("netSalary", 4460.50),
+                            overtime = obj.optDouble("overtime", 0.0),
+                            incentives = obj.optDouble("incentives", 0.0),
+                            thirteenthMonth = obj.optDouble("thirteenthMonth", 0.0),
+                            otherIncome = obj.optDouble("otherIncome", 0.0),
+                            reimbursements = obj.optDouble("reimbursements", 0.0),
+                            unconfirmedIncome = obj.optDouble("unconfirmedIncome", 0.0),
+                            isConfirmedReceived = obj.optBoolean("isConfirmedReceived", true),
+                            actualEmployeeKwsp = optNullableDouble(obj, "actualEmployeeKwsp"),
+                            actualEmployerKwsp = optNullableDouble(obj, "actualEmployerKwsp"),
+                            updatedTimestamp = obj.optLong("updatedTimestamp", System.currentTimeMillis())
+                        )
+                    )
+                }
+            }
+
+            val allocationsArray = root.optJSONArray("payday_allocations")
+            if (allocationsArray != null) {
+                for (i in 0 until allocationsArray.length()) {
+                    val obj = allocationsArray.optJSONObject(i) ?: continue
+                    val monthKey = obj.optString("monthKey", "")
+                    if (monthKey.isBlank()) continue
+                    val existing = paydayAllocationDao.getAllocationForMonthDirect(monthKey)
+                    paydayAllocationDao.insertOrUpdate(
+                        PaydayAllocationEntity(
+                            id = existing?.id ?: 0L,
+                            monthKey = monthKey,
+                            cashSourceMode = obj.optString("cashSourceMode", "OPENING_PLUS_CASHFLOW"),
+                            openingCashInput = obj.optDouble("openingCashInput", 0.0),
+                            confirmedAvailableCash = obj.optDouble("confirmedAvailableCash", 0.0),
+                            calculatedMonthlyCashflow = obj.optDouble("calculatedMonthlyCashflow", 0.0),
+                            reimbursementsExcluded = obj.optDouble("reimbursementsExcluded", 0.0),
+                            unconfirmedIncomeExcluded = obj.optDouble("unconfirmedIncomeExcluded", 0.0),
+                            upcomingEssentialExpensesInput = optNullableDouble(obj, "upcomingEssentialExpensesInput"),
+                            emergencyFundTargetInput = optNullableDouble(obj, "emergencyFundTargetInput"),
+                            cashBufferTargetInput = optNullableDouble(obj, "cashBufferTargetInput"),
+                            minCashBufferEnforced = obj.optDouble("minCashBufferEnforced", 0.0),
+                            recEssentialCommitments = obj.optDouble("recEssentialCommitments", 0.0),
+                            recMinDebtPayments = obj.optDouble("recMinDebtPayments", 0.0),
+                            recUpcomingEssentials = obj.optDouble("recUpcomingEssentials", 0.0),
+                            recExtraDebtRepayment = obj.optDouble("recExtraDebtRepayment", 0.0),
+                            recExtraDebtTargetKey = optNullableString(obj, "recExtraDebtTargetKey"),
+                            recDebtAllocationsJson = obj.optString("recDebtAllocationsJson", "[]"),
+                            recEmergencySavings = obj.optDouble("recEmergencySavings", 0.0),
+                            recDiscretionaryAllowance = obj.optDouble("recDiscretionaryAllowance", 0.0),
+                            recRemainingBuffer = obj.optDouble("recRemainingBuffer", 0.0),
+                            approvedExtraDebtRepayment = obj.optDouble("approvedExtraDebtRepayment", 0.0),
+                            approvedDebtAllocationsJson = obj.optString("approvedDebtAllocationsJson", "[]"),
+                            approvedEmergencySavings = obj.optDouble("approvedEmergencySavings", 0.0),
+                            approvedDiscretionaryAllowance = obj.optDouble("approvedDiscretionaryAllowance", 0.0),
+                            approvedRemainingBuffer = obj.optDouble("approvedRemainingBuffer", 0.0),
+                            hasOverrides = obj.optBoolean("hasOverrides", false),
+                            isApproved = obj.optBoolean("isApproved", false),
+                            approvedTimestamp = optNullableLong(obj, "approvedTimestamp"),
+                            rationaleSummary = obj.optString("rationaleSummary", ""),
+                            updatedTimestamp = obj.optLong("updatedTimestamp", System.currentTimeMillis())
+                        )
+                    )
+                }
+            }
+
+            val progressArray = root.optJSONArray("monthly_checkin_progress")
+            if (progressArray != null) {
+                for (i in 0 until progressArray.length()) {
+                    val obj = progressArray.optJSONObject(i) ?: continue
+                    val monthKey = obj.optString("monthKey", "")
+                    if (monthKey.isBlank()) continue
+                    monthlyCheckInProgressDao.insertOrUpdate(
+                        MonthlyCheckInProgressEntity(
+                            monthKey = monthKey,
+                            stage3Reviewed = obj.optBoolean("stage3Reviewed", false),
+                            stage4Confirmed = obj.optBoolean("stage4Confirmed", false),
+                            stage5Reviewed = obj.optBoolean("stage5Reviewed", false),
+                            stage6Completed = obj.optBoolean("stage6Completed", false),
+                            updatedTimestamp = obj.optLong("updatedTimestamp", System.currentTimeMillis())
+                        )
+                    )
+                }
+            }
+
             syncDedicatedSavingsToProfile()
             triggerAchievementEvaluation()
-            ExpenseWidgetProvider.updateAllWidgets(context)
+            try {
+                ExpenseWidgetProvider.updateAllWidgets(context)
+            } catch (_: Exception) {
+                // Ignore widget update failures when running under headless test runners
+            }
             true
         } catch (e: Exception) {
             e.printStackTrace()
             false
+        }
+    }
+
+    private fun optNullableDouble(obj: JSONObject, key: String): Double? {
+        if (!obj.has(key) || obj.isNull(key)) return null
+        val value = obj.optDouble(key, Double.NaN)
+        return if (value.isNaN()) null else value
+    }
+
+    private fun optNullableLong(obj: JSONObject, key: String): Long? {
+        if (!obj.has(key) || obj.isNull(key)) return null
+        return obj.optLong(key)
+    }
+
+    private fun optNullableString(obj: JSONObject, key: String): String? {
+        if (!obj.has(key) || obj.isNull(key)) return null
+        return obj.optString(key).takeIf { it.isNotEmpty() }
+    }
+
+    private fun optNullableBoolean(obj: JSONObject, key: String): Boolean? {
+        if (!obj.has(key) || obj.isNull(key)) return null
+        return when (val raw = obj.opt(key)) {
+            is Boolean -> raw
+            is String -> raw.toBooleanStrictOrNull()
+            is Number -> raw.toInt() != 0
+            else -> null
         }
     }
 }

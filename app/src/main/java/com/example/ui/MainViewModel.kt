@@ -11,6 +11,7 @@ import com.example.data.model.DebtEntity
 import com.example.data.model.ExpenseEntity
 import com.example.data.model.FinancialProfileEntity
 import com.example.data.model.FlowchartVerificationEntity
+import com.example.data.model.MonthlyCheckInProgressEntity
 import com.example.data.model.MonthlyIncomeEntity
 import com.example.data.model.PaydayAllocationEntity
 import com.example.data.model.SavingsAccountEntity
@@ -105,6 +106,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val currentMonthPaydayAllocation: StateFlow<PaydayAllocationEntity?> = _selectedMonthKey
         .flatMapLatest { key -> repository.getPaydayAllocationForMonth(key) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val currentMonthCheckInProgress: StateFlow<MonthlyCheckInProgressEntity?> = _selectedMonthKey
+        .flatMapLatest { key -> repository.getCheckInProgressForMonth(key) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val flowchartVerifications: StateFlow<List<FlowchartVerificationEntity>> = repository.flowchartVerificationsFlow
@@ -234,7 +239,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Payday Intelligence V1 Actions ---
+    // --- Payday Intelligence V1/V1.1 Actions ---
     fun savePaydayAllocation(allocation: PaydayAllocationEntity) {
         viewModelScope.launch {
             repository.savePaydayAllocation(allocation)
@@ -247,6 +252,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 )
             )
+        }
+    }
+
+    fun saveCheckInProgress(progress: MonthlyCheckInProgressEntity) {
+        viewModelScope.launch {
+            repository.saveCheckInProgress(progress)
         }
     }
 

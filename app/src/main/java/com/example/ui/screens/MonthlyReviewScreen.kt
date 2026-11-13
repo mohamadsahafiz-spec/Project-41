@@ -268,7 +268,16 @@ fun MonthlyReviewScreen(
             // Three Distinct Cash Tiers & Liabilities (Requirement 3 & 7)
             item {
                 ReviewSectionCard(title = "Financial Position (Three Distinct Tiers)") {
-                    ReviewRow(label = "Tier A: Everyday Cash (Bank Balance)", value = DateUtils.formatCurrency(summary.everydayCash))
+                    ReviewRow(label = "Tier A: Current Account Cash (Bank Balance)", value = DateUtils.formatCurrency(summary.everydayCash))
+                    ReviewRow(label = "Calculated Monthly Net Cashflow (Income - Outflows)", value = DateUtils.formatCurrency(summary.remainingCashflow))
+                    Text(
+                        text = "Note: Current Account Cash is your calibrated live bank balance; Monthly Cashflow tracks this month's income minus recorded outflows separately to prevent double-counting.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
                     ReviewRow(label = "Tier B: Dedicated Savings Vault", value = DateUtils.formatCurrency(summary.dedicatedSavings))
                     ReviewRow(
                         label = "   └ Dedicated Emergency Fund",

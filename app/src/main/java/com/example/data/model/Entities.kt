@@ -156,23 +156,29 @@ data class MonthlyIncomeEntity(
 data class PaydayAllocationEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val monthKey: String,
+    val cashSourceMode: String = "OPENING_PLUS_CASHFLOW",
+    val openingCashInput: Double = 0.0,
     val confirmedAvailableCash: Double,
+    val calculatedMonthlyCashflow: Double = 0.0,
     val reimbursementsExcluded: Double = 0.0,
     val unconfirmedIncomeExcluded: Double = 0.0,
     val upcomingEssentialExpensesInput: Double? = null,
     val emergencyFundTargetInput: Double? = null,
     val cashBufferTargetInput: Double? = null,
+    val minCashBufferEnforced: Double = 0.0,
     // Engine recommendations (immutable snapshot for this plan)
     val recEssentialCommitments: Double,
     val recMinDebtPayments: Double,
     val recUpcomingEssentials: Double,
     val recExtraDebtRepayment: Double,
     val recExtraDebtTargetKey: String? = null,
+    val recDebtAllocationsJson: String = "[]",
     val recEmergencySavings: Double,
     val recDiscretionaryAllowance: Double,
     val recRemainingBuffer: Double,
     // User-approved / overridden allocations
     val approvedExtraDebtRepayment: Double,
+    val approvedDebtAllocationsJson: String = "[]",
     val approvedEmergencySavings: Double,
     val approvedDiscretionaryAllowance: Double,
     val approvedRemainingBuffer: Double,
@@ -180,6 +186,20 @@ data class PaydayAllocationEntity(
     val isApproved: Boolean = false,
     val approvedTimestamp: Long? = null,
     val rationaleSummary: String = "",
+    val updatedTimestamp: Long = System.currentTimeMillis()
+)
+
+/**
+ * Persistent Monthly Check-In Stage Completion state per month.
+ * Prevents temporary UI state loss on screen recreation and preserves completion accuracy.
+ */
+@Entity(tableName = "monthly_checkin_progress")
+data class MonthlyCheckInProgressEntity(
+    @PrimaryKey val monthKey: String,
+    val stage3Reviewed: Boolean = false,
+    val stage4Confirmed: Boolean = false,
+    val stage5Reviewed: Boolean = false,
+    val stage6Completed: Boolean = false,
     val updatedTimestamp: Long = System.currentTimeMillis()
 )
 
